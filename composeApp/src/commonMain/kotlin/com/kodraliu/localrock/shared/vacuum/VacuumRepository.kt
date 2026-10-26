@@ -871,7 +871,11 @@ class VacuumRepository(
     private val scheduleWrites = Mutex()
     private suspend fun <T> scheduleWrite(action: suspend () -> T): T {
         if (!scheduleWrites.tryLock()) throw ScheduleException("A schedule save is already in progress. No additional write was sent.")
-        try { return action() } finally { scheduleWrites.unlock() }
+        try { return action() }
+        catch (e: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            throw ScheduleException("Schedule request timed out. Its final state is unconfirmed; refresh before retrying. No automatic retry was sent.")
+        } finally { scheduleWrites.unlock() }
     }
 
     private val scheduleEnablement by lazy {
@@ -953,6 +957,10 @@ class VacuumRepository(
             id = timerId, enabled = true, hour = hour, minute = minute,
             weekdays = newWeekdays, settings = timerSettings, date = date,
         )
+        if (jobsSupported) {
+            fetchTimers()
+            return _timers.value.singleOrNull { it.id == timer.id } ?: timer
+        }
         _timers.value = _timers.value + timer
         return timer
     }
@@ -961,7 +969,7 @@ class VacuumRepository(
      * Adds the cloud's record of the server_timer schedule [robotId] just saved on the robot, and
      * returns the record's own id. Without it the official app deletes the robot's schedule as a
      * stray, and this app's list, which reads the records, would not show it. If the record cannot
-     * be written the robot's schedule is removed again, so nothing is left half saved.
+     * be confirmed, preserve the native entry and report the partial save for explicit recovery.
      */
     private suspend fun createCloudRecord(
         robotId: String,
@@ -980,24 +988,11 @@ class VacuumRepository(
             robotId = robotId,
             forCreate = true,
         )
-        val native = session.getServerTimer().also { it.requireOk("get_server_timer") }.result
-        if (nativeTimerState(native, robotId) != "On") {
-            throw ScheduleException("Native timer creation could not be verified. Server job was not created. Refresh before retrying.")
-        }
-        var returnedId: String? = null
-        try { returnedId = mirror.create(duid, body) }
-        catch (e: CancellationException) { currentCoroutineContext().ensureActive() }
-        catch (_: Exception) { /* A lost response may hide a saved job. Never retry the POST. */ }
-        val jobs = try { mirror.list(duid) }
-        catch (e: CancellationException) { currentCoroutineContext().ensureActive(); throw ScheduleException("Native timer was created; server save is unconfirmed. No cleanup or retry was attempted.") }
-        catch (_: Exception) { throw ScheduleException("Native timer was created; server save is unconfirmed. No cleanup or retry was attempted.") }
-        val matches = jobs.filter { it.nativeName == robotId }
-        val saved = matches.singleOrNull()
-        if (saved != null && (returnedId == null || returnedId == saved.id) &&
-            body.filterKeys { it != "id" }.all { (key, value) ->
-                (if (key == "param") saved.param else saved.raw[key]) == value
-            }) return saved.id
-        throw ScheduleException("Native timer was created, but the matching server job is missing, ambiguous or different. No timer was deleted and creation was not repeated. Refresh before retrying.")
+        return ServerJobCreation(
+            readTimers = { session.getServerTimer().also { it.requireOk("get_server_timer") }.result },
+            createJob = { mirror.create(duid, it) },
+            readJobs = { mirror.list(duid) },
+        ).confirm(robotId, body).id
     }
 
     /** Rewrites the cloud record [jobId] of a server_timer schedule to match what the robot now holds. */
@@ -1035,9 +1030,8 @@ class VacuumRepository(
         if (useServerTimer) timer.settings.serverTimerId ?: timer.id else timer.id
 
     /**
-     * Rewrites [timer]'s time, days and options; its id and on/off state are kept. The old schedule
-     * is deleted and added again rather than overwritten, so an option that was dropped is simply
-     * absent and no firmware has to accept a null. If the new one is refused the old one is put back.
+     * Server jobs are patched without recreating native entries or changing enablement unless
+     * explicitly requested. Legacy-only records retain their protocol-specific edit path.
      */
     suspend fun updateTimer(
         timer: CleanTimer, hour: Int, minute: Int, weekdays: Set<Int>, settings: TimerSettings,
@@ -1048,7 +1042,8 @@ class VacuumRepository(
         if (job != null) {
             val date = if (once) {
                 if (timer.date != null && hour == timer.hour && minute == timer.minute) timer.date
-                else nextOccurrence(hour, minute)
+                else nextTimerDate(nowEpochSeconds().toLong(),
+                    if (job.timezone.isBlank()) TimeZone.currentSystemDefault() else TimeZone.of(job.timezone), hour, minute)
             } else null
             val patch = serverJobEditPatch(timer, hour, minute, weekdays, settings, once, date, settingsChanged, timingChanged)
             val sync = enabled != timer.enabled
@@ -1070,7 +1065,9 @@ class VacuumRepository(
         val date = if (once) nextOccurrence(hour, minute) else null
         val newWeekdays = if (once) emptySet() else weekdays
         val cron = buildCron(minute, hour, newWeekdays, date)
-        val useServerTimer = prefersServerTimer()
+        // A legacy-view record without a native name must use its legacy ID, even on a
+        // model whose feature flag advertises server_timer (the old-server fallback case).
+        val useServerTimer = timer.settings.serverTimerId != null
         val id = robotId(timer, useServerTimer)
         // The new settings come from the edit dialog's own choices, which know nothing of the
         // mirror link; carry it forward so a second edit can still find the real robot-side id.
@@ -1106,7 +1103,9 @@ class VacuumRepository(
 
     private suspend fun toggleLegacyTimer(timer: CleanTimer) {
         val updated = timer.copy(enabled = !timer.enabled)
-        val useServerTimer = prefersServerTimer()
+        // A legacy-view record without a native name must use its legacy ID, even on a
+        // model whose feature flag advertises server_timer (the old-server fallback case).
+        val useServerTimer = timer.settings.serverTimerId != null
         val id = robotId(timer, useServerTimer)
         if (useServerTimer) {
             session.updServerTimer(id, updated.enabled).requireOk("upd_server_timer")
@@ -1133,7 +1132,9 @@ class VacuumRepository(
     }
 
     private suspend fun deleteLegacyTimer(timer: CleanTimer) {
-        val useServerTimer = prefersServerTimer()
+        // A legacy-view record without a native name must use its legacy ID, even on a
+        // model whose feature flag advertises server_timer (the old-server fallback case).
+        val useServerTimer = timer.settings.serverTimerId != null
         val id = robotId(timer, useServerTimer)
         if (useServerTimer) {
             session.delServerTimer(id).requireOk("del_server_timer")

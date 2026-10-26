@@ -68,6 +68,8 @@ import com.kodraliu.localrock.shared.vacuum.summary
 import com.kodraliu.localrock.shared.vacuum.timerSettingsFor
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,7 +93,7 @@ fun ScheduleScreen(
         loading = true
         loadError = null
         try { repository.fetchTimers() }
-        catch (e: CancellationException) { throw e }
+        catch (e: CancellationException) { currentCoroutineContext().ensureActive(); loadError = "Schedule request timed out. Retry to refresh." }
         catch (e: Exception) { loadError = e.message ?: "Could not load schedules" }
         finally { loading = false }
     }
@@ -147,7 +149,7 @@ fun ScheduleScreen(
             }
         } else {
             LazyColumn(contentPadding = padding) {
-                items(timers, key = { it.id }) { timer ->
+                items(timers.sortedWith(compareBy<CleanTimer> { it.hour }.thenBy { it.minute }.thenBy { it.id }), key = { it.id }) { timer ->
                     TimerRow(
                         timer = timer,
                         busy = saving,
@@ -391,7 +393,7 @@ private fun TimerDialog(
                             detailScope.launch {
                                 nativeState = "Checking…"
                                 try { nativeState = readNativeState?.invoke() ?: "Not checked" }
-                                catch (e: CancellationException) { throw e }
+                                catch (e: CancellationException) { currentCoroutineContext().ensureActive(); nativeState = "Unknown — request timed out" }
                                 catch (_: Exception) { nativeState = "Unknown — could not read timer" }
                             }
                         }) { Text("Check native timer") }

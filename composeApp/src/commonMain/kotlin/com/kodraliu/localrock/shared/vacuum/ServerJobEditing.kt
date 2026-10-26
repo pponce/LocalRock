@@ -3,6 +3,7 @@ package com.kodraliu.localrock.shared.vacuum
 import com.kodraliu.localrock.shared.schedule.ScheduleException
 import com.kodraliu.localrock.shared.schedule.ServerSchedule
 import kotlinx.serialization.json.*
+import kotlinx.datetime.LocalDate
 
 /** Unsupported jobs stay visible rather than becoming a misleading empty schedule list. */
 internal fun ServerSchedule.toCleanTimer(): CleanTimer {
@@ -11,7 +12,7 @@ internal fun ServerSchedule.toCleanTimer(): CleanTimer {
     val dated = if (parts.size == 5 && parts[4] in listOf("?", "*")) {
         val day = parts[2].toIntOrNull()
         val month = parts[3].toIntOrNull()
-        if (day != null && month != null && month in 1..12 && day in 1..31) TimerDate(month, day) else null
+        if (day != null && month != null && runCatching { LocalDate(2000, month, day) }.isSuccess) TimerDate(month, day) else null
     } else null
     val h = parts.getOrNull(1)?.toIntOrNull()?.takeIf { it in 0..23 }
     val m = parts.getOrNull(0)?.toIntOrNull()?.takeIf { it in 0..59 }
