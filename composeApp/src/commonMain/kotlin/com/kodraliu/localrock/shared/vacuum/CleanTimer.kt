@@ -41,18 +41,18 @@ data class TimerSettings(
     // The official app maintains a second, independent copy of a server_timer schedule over
     // HTTP (POST/PUT /user/devices/{duid}/jobs), its own cloud-sync record with its own id, not
     // the robot's. That copy's settings carry this "name" field, the real server_timer id it
-    // mirrors, confirmed live. get_timer answers from that HTTP-side store, so a schedule read
-    // from it is this mirror, not the robot's real entry: editing or deleting it must use this
-    // id, not the timer's own [CleanTimer.id], or the write lands on nothing the robot has.
+    // mirrors. HTTP jobs carry this native reference separately from the job ID. Native
+    // commands must use this name, not [CleanTimer.id]. A job without it is server-only.
     // Never sent back out in [toActionObject]; the robot's own entries never carry it.
     val serverTimerId: String? = null,
 )
 
 /** The cleaning choice a schedule offers, as the official app words it. */
-enum class TimerKind { CURRENT, SMART_PLAN, VACUUM, VAC_AND_MOP, MOP }
+enum class TimerKind { CURRENT, SMART_PLAN, CUSTOM, VACUUM, VAC_AND_MOP, MOP }
 
 val TimerSettings.kind: TimerKind
     get() = when {
+        isCustomizeModeSet(fanPower, waterBoxMode, mopMode) -> TimerKind.CUSTOM
         isSmartModeSet(fanPower, waterBoxMode, mopMode) -> TimerKind.SMART_PLAN
         waterBoxMode == WaterBoxMode.OFF -> TimerKind.VACUUM
         fanPower == VacuumFanPower.OFF -> TimerKind.MOP
@@ -72,6 +72,7 @@ fun timerSettingsFor(
     mopMode: Int?,
     repeat: Int?,
 ): TimerSettings = when (kind) {
+    TimerKind.CUSTOM -> TimerSettings(VacuumFanPower.CUSTOM, WaterBoxMode.CUSTOM, MopRoute.CUSTOM, repeat)
     TimerKind.CURRENT -> TimerSettings(repeat = repeat)
     TimerKind.SMART_PLAN -> TimerSettings(VacuumFanPower.SMART, WaterBoxMode.SMART, MopRoute.SMART, repeat)
     TimerKind.VACUUM -> TimerSettings(fanPower, WaterBoxMode.OFF, null, repeat)
@@ -144,6 +145,7 @@ fun TimerSettings.summary(): String? {
         return parts.joinToString(" · ")
     }
     when (kind) {
+        TimerKind.CUSTOM -> parts += "Custom"
         TimerKind.SMART_PLAN -> Unit
         TimerKind.VACUUM -> parts += "Vacuum"
         TimerKind.VAC_AND_MOP -> parts += "Vacuum and mop"
