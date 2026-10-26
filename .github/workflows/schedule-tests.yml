@@ -1,7 +1,7 @@
 name: Schedule support
 on:
   push:
-    branches: [SCHEDULE_SUPPORT]
+    branches: [SCHEDULE_SUPPORT, SCHEDULE_SUPPORT_MAP_VIEWPORT]
   pull_request:
   workflow_dispatch:
 permissions:
