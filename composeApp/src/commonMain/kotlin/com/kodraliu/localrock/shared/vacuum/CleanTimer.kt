@@ -1,5 +1,6 @@
 package com.kodraliu.localrock.shared.vacuum
 
+import com.kodraliu.localrock.shared.schedule.ServerSchedule
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -14,6 +15,8 @@ data class CleanTimer(
     val weekdays: Set<Int>, // 0=Sun, 1=Mon … 6=Sat; empty means every day, unless [date] is set
     val settings: TimerSettings = TimerSettings(),
     val date: TimerDate? = null, // set for a one-time schedule, which runs on that day only
+    val serverJob: ServerSchedule? = null,
+    val editable: Boolean = true,
 )
 
 /**
@@ -30,7 +33,7 @@ data class TimerSettings(
     val waterBoxMode: Int? = null,
     val mopMode: Int? = null,
     val repeat: Int? = null,
-    // Carried by server_timer schedules, never set by this app's own UI yet: which rooms to
+    // Carried by server_timer schedules: which rooms to
     // clean ("0" for the whole home), whether mopping is on, and which saved map to use.
     val segments: String? = null,
     val cleanMop: Int? = null,
@@ -161,3 +164,4 @@ fun TimerSettings.summary(): String? {
     repeat?.takeIf { it > 1 }?.let { parts += "$it passes" }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
+
