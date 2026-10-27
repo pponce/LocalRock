@@ -8,24 +8,16 @@ import ComposeApp
 // (`CameraLiveSession`) drives signaling over MQTT; this class is only the peer-connection engine
 // plus the render view.
 //
-// SETUP (once, in Xcode — this file will not compile until then):
-//   1. Add the WebRTC package to the iosApp target. Easiest is Swift Package Manager:
-//        https://github.com/stasel/WebRTC  (products: "WebRTC")
-//      or CocoaPods `pod 'GoogleWebRTC'`.
-//   2. Add this file to the iosApp target (new files are not auto-added to the .pbxproj).
-//   3. Info.plist: NSCameraUsageDescription / NSMicrophoneUsageDescription are REQUIRED even for
-//      pure receive-only viewing. App Store static analysis (ITMS-90683) flags the linked
-//      WebRTC.framework's references to the capture APIs regardless of whether we call them.
-//      Both keys are already present in iosApp/Info.plist.
-//
-// Delegate signatures below target WebRTC ~M1xx (stasel/GoogleWebRTC). If the compiler flags a
-// mismatch, adjust the selector to match your installed version — same fixup dance as CocoaMQTT.
+// The target's synchronized source folder includes this file. WebRTC is linked via SPM;
+// ContentView injects WebRtcNativeFactory. This viewer never creates a local capture track.
 
 final class WebRtcNativeFactory: NSObject, RtcNativePeerFactory {
 
     private let factory: RTCPeerConnectionFactory
 
     override init() {
+        // Native diagnostics may contain SDP/ICE; the app exposes allowlisted stats instead.
+        RTCSetMinDebugLogLevel(.none)
         RTCInitializeSSL()
         let encoder = RTCDefaultVideoEncoderFactory()
         let decoder = RTCDefaultVideoDecoderFactory()
@@ -33,7 +25,7 @@ final class WebRtcNativeFactory: NSObject, RtcNativePeerFactory {
         super.init()
     }
 
-    func create(iceServers: [RtcNativeIceServer], listener: RtcNativePeerListener) -> RtcNativePeer {
+    func create(iceServers: [RtcNativeIceServer], listener: RtcNativePeerListener) -> RtcNativePeer? {
         return WebRtcPeer(factory: factory, iceServers: iceServers, listener: listener)
     }
 }
@@ -44,8 +36,10 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
     private let peerConnection: RTCPeerConnection
     private let videoView: RTCMTLVideoView
     private var remoteVideoTrack: RTCVideoTrack?
+    // Access renderer state only on the main queue.
+    private var rendererClosed = false
 
-    init(factory: RTCPeerConnectionFactory, iceServers: [RtcNativeIceServer], listener: RtcNativePeerListener) {
+    init?(factory: RTCPeerConnectionFactory, iceServers: [RtcNativeIceServer], listener: RtcNativePeerListener) {
         self.listener = listener
 
         let config = RTCConfiguration()
@@ -60,7 +54,7 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
 
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         guard let pc = factory.peerConnection(with: config, constraints: constraints, delegate: nil) else {
-            fatalError("RTCPeerConnectionFactory.peerConnection returned nil")
+            return nil
         }
         self.peerConnection = pc
 
@@ -85,36 +79,61 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         peerConnection.offer(for: constraints) { [weak self] sdp, error in
             guard let self = self else { return }
-            if let error = error { onError(error.localizedDescription); return }
+            if error != nil { onError("Video offer creation failed"); return }
             guard let sdp = sdp else { onError("createOffer returned a nil description"); return }
             self.peerConnection.setLocalDescription(sdp) { error in
-                if let error = error { onError(error.localizedDescription); return }
+                if error != nil { onError("Video offer creation failed"); return }
                 onSuccess(sdp.sdp)
             }
         }
     }
 
-    func setRemoteAnswer(sdp: String) {
-        let description = RTCSessionDescription(type: .answer, sdp: sdp)
-        peerConnection.setRemoteDescription(description) { error in
-            if let error = error {
-                print("[LocalRock] setRemoteDescription failed: \(error.localizedDescription)")
-            }
+    func setRemoteAnswer(sdp: String, onSuccess: @escaping () -> Void, onError: @escaping () -> Void) {
+        peerConnection.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { error in
+            if error != nil { onError() } else { onSuccess() }
         }
     }
 
-    func addRemoteCandidate(sdpMid: String?, sdpMLineIndex: Int32, candidate: String) {
-        let ice = RTCIceCandidate(sdp: candidate, sdpMLineIndex: sdpMLineIndex, sdpMid: sdpMid)
-        peerConnection.add(ice) { error in
-            if let error = error {
-                print("[LocalRock] addIceCandidate failed: \(error.localizedDescription)")
+    func addRemoteCandidate(sdpMid: String?, sdpMLineIndex: Int32, candidate: String,
+                            onSuccess: @escaping () -> Void, onError: @escaping () -> Void) {
+        peerConnection.add(RTCIceCandidate(sdp: candidate, sdpMLineIndex: sdpMLineIndex, sdpMid: sdpMid)) { error in
+            if error != nil { onError() } else { onSuccess() }
+        }
+    }
+
+    func diagnostics(onResult: @escaping (RtcDiagnostics) -> Void) {
+        peerConnection.statistics { report in
+            let stats = report.statistics
+            // Use the selected pair on the video RTP transport. A successful/nominated or
+            // gathered candidate is not proof it carries this stream.
+            let video = stats.values.first {
+                $0.type == "inbound-rtp" &&
+                    (($0.values["kind"] as? String ?? $0.values["mediaType"] as? String) == "video")
             }
+            let transportId = video?.values["transportId"] as? String
+            let transport = transportId.flatMap { stats[$0] }
+            let pairId = transport?.values["selectedCandidatePairId"] as? String
+            let pair = pairId.flatMap { stats[$0] }
+            let localId = pair?.values["localCandidateId"] as? String
+            let remoteId = pair?.values["remoteCandidateId"] as? String
+            let local = localId.flatMap { stats[$0] }
+            let remote = remoteId.flatMap { stats[$0] }
+            let frames = (video?.values["framesDecoded"] as? NSNumber)?.int64Value ?? 0
+            onResult(RtcDiagnosticsKt.selectedPairDiagnostics(
+                localType: local?.values["candidateType"] as? String,
+                remoteType: remote?.values["candidateType"] as? String,
+                protocol: local?.values["protocol"] as? String,
+                videoReceived: frames > 0
+            ))
         }
     }
 
     func close() {
-        remoteVideoTrack?.remove(videoView)
-        remoteVideoTrack = nil
+        WebRtcPeer.onMainVoid {
+            self.rendererClosed = true
+            self.remoteVideoTrack?.remove(self.videoView)
+            self.remoteVideoTrack = nil
+        }
         peerConnection.close()
     }
 
@@ -139,8 +158,12 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
     // Unified-plan track arrival: attach the remote video track to the render view.
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams: [RTCMediaStream]) {
         if let track = rtpReceiver.track as? RTCVideoTrack {
-            self.remoteVideoTrack = track
-            WebRtcPeer.onMainVoid { track.add(self.videoView) }
+            WebRtcPeer.onMainVoid {
+                guard !self.rendererClosed else { return }
+                self.remoteVideoTrack?.remove(self.videoView)
+                self.remoteVideoTrack = track
+                track.add(self.videoView)
+            }
         }
     }
 

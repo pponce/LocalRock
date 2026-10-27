@@ -10,6 +10,7 @@ import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
 import org.webrtc.IceCandidate
+import org.webrtc.Logging
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.MediaStreamTrack
@@ -22,7 +23,7 @@ import org.webrtc.SessionDescription
 import org.webrtc.VideoTrack
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 actual val liveViewSupported: Boolean = true
 
@@ -35,6 +36,8 @@ private val peerConnectionFactory: PeerConnectionFactory by lazy {
     PeerConnectionFactory.initialize(
         PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
     )
+    // Native diagnostics can contain SDP/ICE. Use only the sanitized stats shown by the app.
+    Logging.enableLogToDebugOutput(Logging.Severity.LS_NONE)
     PeerConnectionFactory.builder()
         .setVideoDecoderFactory(DefaultVideoDecoderFactory(rtcEglBase.eglBaseContext))
         .setVideoEncoderFactory(DefaultVideoEncoderFactory(rtcEglBase.eglBaseContext, true, true))
@@ -79,35 +82,61 @@ internal class AndroidRtcPeer(iceServers: List<RtcIceServer>) : RtcPeer {
             MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO,
             RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY),
         )
-        val offer = suspendCoroutine<SessionDescription> { cont ->
+        val offer = suspendCancellableCoroutine<SessionDescription> { cont ->
             pc.createOffer(object : SdpObserverAdapter() {
-                override fun onCreateSuccess(desc: SessionDescription) = cont.resume(desc)
-                override fun onCreateFailure(error: String?) =
-                    cont.resumeWithException(RuntimeException("createOffer failed: $error"))
+                override fun onCreateSuccess(desc: SessionDescription) { if (cont.isActive) cont.resume(desc) }
+                override fun onCreateFailure(error: String?) {
+                    if (cont.isActive) cont.resumeWithException(RuntimeException("Video offer creation failed"))
+                }
             }, MediaConstraints())
         }
-        suspendCoroutine<Unit> { cont ->
+        suspendCancellableCoroutine<Unit> { cont ->
             pc.setLocalDescription(object : SdpObserverAdapter() {
-                override fun onSetSuccess() = cont.resume(Unit)
-                override fun onSetFailure(error: String?) =
-                    cont.resumeWithException(RuntimeException("setLocalDescription failed: $error"))
+                override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
+                override fun onSetFailure(error: String?) {
+                    if (cont.isActive) cont.resumeWithException(RuntimeException("Local video description rejected"))
+                }
             }, offer)
         }
         return offer.description
     }
 
     override suspend fun setRemoteAnswer(sdp: String) {
-        suspendCoroutine<Unit> { cont ->
+        suspendCancellableCoroutine<Unit> { cont ->
             pc.setRemoteDescription(object : SdpObserverAdapter() {
-                override fun onSetSuccess() = cont.resume(Unit)
-                override fun onSetFailure(error: String?) =
-                    cont.resumeWithException(RuntimeException("setRemoteDescription failed: $error"))
+                override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
+                override fun onSetFailure(error: String?) {
+                    if (cont.isActive) cont.resumeWithException(RuntimeException("Video answer rejected"))
+                }
             }, SessionDescription(SessionDescription.Type.ANSWER, sdp))
         }
     }
 
-    override fun addRemoteCandidate(candidate: RtcIceCandidate) {
-        pc.addIceCandidate(IceCandidate(candidate.sdpMid ?: "0", candidate.sdpMLineIndex, candidate.candidate))
+    override suspend fun addRemoteCandidate(candidate: RtcIceCandidate) {
+        check(pc.addIceCandidate(IceCandidate(candidate.sdpMid ?: "0", candidate.sdpMLineIndex, candidate.candidate))) {
+            "Video candidate rejected"
+        }
+    }
+
+    override suspend fun diagnostics(): RtcDiagnostics = suspendCancellableCoroutine { cont ->
+        pc.getStats { report ->
+            val stats = report.statsMap
+            val video = stats.values.firstOrNull {
+                it.type == "inbound-rtp" && (it.members["kind"] ?: it.members["mediaType"]) == "video"
+            }
+            val transport = (video?.members?.get("transportId") as? String)?.let { stats[it] }
+            val pair = (transport?.members?.get("selectedCandidatePairId") as? String)?.let { stats[it] }
+            val local = (pair?.members?.get("localCandidateId") as? String)?.let { stats[it] }
+            val remote = (pair?.members?.get("remoteCandidateId") as? String)?.let { stats[it] }
+            val frames = (video?.members?.get("framesDecoded") as? Number)?.toLong() ?: 0L
+            val result = selectedPairDiagnostics(
+                local?.members?.get("candidateType") as? String,
+                remote?.members?.get("candidateType") as? String,
+                local?.members?.get("protocol") as? String,
+                frames > 0L,
+            )
+            if (cont.isActive) cont.resume(result)
+        }
     }
 
     override fun close() {

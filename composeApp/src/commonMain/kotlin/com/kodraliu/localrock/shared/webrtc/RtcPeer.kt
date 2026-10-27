@@ -24,7 +24,8 @@ interface RtcPeer {
 
     suspend fun createOffer(): String
     suspend fun setRemoteAnswer(sdp: String)
-    fun addRemoteCandidate(candidate: RtcIceCandidate)
+    suspend fun addRemoteCandidate(candidate: RtcIceCandidate)
+    suspend fun diagnostics(): RtcDiagnostics
     fun close()
 }
 

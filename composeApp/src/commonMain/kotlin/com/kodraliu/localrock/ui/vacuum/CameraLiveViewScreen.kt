@@ -1,39 +1,14 @@
 package com.kodraliu.localrock.ui.vacuum
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.VideocamOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,206 +16,115 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.kodraliu.localrock.shared.vacuum.camera.CameraLiveSession
+import com.kodraliu.localrock.shared.vacuum.camera.experimentalCameraSupported
 import com.kodraliu.localrock.shared.webrtc.RtcVideoView
 import com.kodraliu.localrock.shared.webrtc.liveViewSupported
-import com.kodraliu.localrock.ui.LocalAppContainer
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CameraLiveViewScreen(
-    viewModel: VacuumViewModel,
-    onBack: () -> Unit,
-) {
-    val container = LocalAppContainer.current
-    val duid = viewModel.repository.duid
-    val liveSession = remember { CameraLiveSession(viewModel.repository.session) }
-    val state by liveSession.state.collectAsState()
-    val peer by liveSession.peer.collectAsState()
+fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
+    val live = remember(viewModel) { CameraLiveSession(viewModel.repository.session) }
+    val state by live.state.collectAsState()
+    val peer by live.peer.collectAsState()
+    val diagnostics by live.diagnostics.collectAsState()
+    val cleanupWarning by live.cleanupWarning.collectAsState()
+    // Existing credentials are kept only for this screen's foreground lifetime.
+    var pin by remember(viewModel) { mutableStateOf("") }
+    var typed by remember { mutableStateOf(true) }
+    val supported = liveViewSupported && experimentalCameraSupported(viewModel.modelName)
 
-    var pin by remember { mutableStateOf(container.appSettings.cameraPin(duid) ?: "") }
-    var autoStarted by remember { mutableStateOf(false) }
-
-    DisposableEffect(Unit) {
-        onDispose { liveSession.dispose() }
-    }
-
-    // If a PIN is already saved, connect immediately.
-    LaunchedEffect(Unit) {
-        if (liveViewSupported && pin.isNotBlank() && !autoStarted) {
-            autoStarted = true
-            liveSession.start(pin)
-        }
+    DisposableEffect(live) { onDispose { live.dispose() } }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        pin = ""
+        live.stop()
     }
 
     Scaffold(
         containerColor = Color.Black,
+        contentColor = Color.White,
         topBar = {
             TopAppBar(
-                title = { Text(viewModel.deviceName, color = Color.White) },
+                title = { Text("Video · experimental", color = Color.White) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Go back", tint = Color.White)
+                    IconButton(onClick = { live.stop(); onBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Go back", tint = Color.White)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black.copy(alpha = 0.6f),
-                ),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black),
             )
         },
-    ) { paddingValues ->
-        Box(
-            // Black runs under the navigation bar too; only the video area is inset.
-            modifier = Modifier.fillMaxSize().background(Color.Black).padding(paddingValues),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (!liveViewSupported) {
-                CameraMessage(
-                    icon = { Icon(Icons.Default.VideocamOff, null, Modifier.size(48.dp), tint = Color.White) },
-                    text = "Camera live view isn't available on this platform yet.",
-                )
-                return@Box
-            }
-
-            when (val s = state) {
-                is CameraLiveSession.State.Idle -> {
-                    PinEntry(
-                        pin = pin,
-                        onPinChange = { pin = it },
-                        onConnect = {
-                            container.appSettings.setCameraPin(duid, pin)
-                            liveSession.start(pin)
-                        },
-                        onSetPinOnRobot = {
-                            container.appSettings.setCameraPin(duid, pin)
-                            liveSession.setPinAndStart(pin)
-                        },
-                    )
-                }
-
-                is CameraLiveSession.State.Connecting -> {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Color.White)
-                        Spacer(Modifier.height(16.dp))
-                        Text(s.stage, color = Color.White, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                is CameraLiveSession.State.Streaming -> {
-                    peer?.let { RtcVideoView(it, Modifier.fillMaxSize()) }
-                    Text(
-                        "LIVE",
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 12.dp, end = 16.dp)
-                            .background(Color.Red.copy(alpha = 0.8f), MaterialTheme.shapes.small)
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-
-                is CameraLiveSession.State.Failed -> {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(24.dp),
-                    ) {
-                        Icon(Icons.Default.VideocamOff, null, Modifier.size(48.dp), tint = Color.White)
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            s.message,
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyMedium,
+    ) { insets ->
+        Box(Modifier.fillMaxSize().padding(insets), contentAlignment = Alignment.Center) {
+            // Attach the renderer while connecting so a first video frame can be decoded.
+            peer?.let { key(it) { RtcVideoView(it, Modifier.fillMaxSize()) } }
+            if (!supported) {
+                Text("Experimental video is currently available for S7 MaxV only, in builds with WebRTC enabled.",
+                    Modifier.padding(24.dp), textAlign = TextAlign.Center)
+            } else when (val s = state) {
+                CameraLiveSession.State.Idle -> Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(viewModel.deviceName, style = MaterialTheme.typography.titleMedium)
+                    Text("Enter your existing camera PIN or pattern. Live view uses your robot's current camera activation and local server.",
+                        textAlign = TextAlign.Center)
+                    if (typed) {
+                        OutlinedTextField(
+                            value = pin, onValueChange = { pin = it }, label = { Text("Existing camera PIN") },
+                            singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                                focusedLabelColor = Color.White, unfocusedLabelColor = Color.LightGray,
+                            ),
                         )
-                        Spacer(Modifier.height(16.dp))
-                        Button(onClick = { liveSession.start(pin) }) { Text("Retry") }
-                        TextButton(onClick = {
-                            container.appSettings.setCameraPin(duid, null)
-                            pin = ""
-                            liveSession.stop()
-                        }) { Text("Change PIN", color = Color.White) }
+                    } else {
+                        PatternPinInput(onPattern = { pin = it })
+                        Text(if (pin.isBlank()) "Draw your existing pattern" else "Pattern entered")
                     }
+                    Button(onClick = { live.start(pin) }, enabled = pin.isNotBlank()) { Text("Start live view") }
+                    TextButton(onClick = { typed = !typed; pin = "" }) {
+                        Text(if (typed) "Use a pattern" else "Use a numeric PIN", color = Color.White)
+                    }
+                    cleanupWarning?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
+                }
+                is CameraLiveSession.State.Connecting -> Column(
+                    Modifier.background(Color.Black.copy(alpha = .8f)).padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator(color = Color.White)
+                    Text(s.stage)
+                    Text(diagnostics.summary, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { live.stop() }) { Text("Cancel", color = Color.White) }
+                }
+                CameraLiveSession.State.Streaming -> Column(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .background(Color.Black.copy(alpha = .8f)).padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("LIVE · ${diagnostics.summary}", style = MaterialTheme.typography.labelMedium)
+                    TextButton(onClick = { live.stop() }) { Text("Stop live view", color = Color.White) }
+                }
+                CameraLiveSession.State.Stopping -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.White)
+                    Text("Releasing camera…", Modifier.padding(16.dp))
+                }
+                is CameraLiveSession.State.Failed -> Column(
+                    Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(s.message, textAlign = TextAlign.Center)
+                    cleanupWarning?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
+                    Button(onClick = { live.start(pin) }, enabled = pin.isNotBlank()) { Text("Retry") }
+                    TextButton(onClick = { pin = ""; live.stop() }) { Text("Enter PIN again", color = Color.White) }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun PinEntry(
-    pin: String,
-    onPinChange: (String) -> Unit,
-    onConnect: () -> Unit,
-    onSetPinOnRobot: () -> Unit,
-) {
-    // Newer models draw the camera PIN as a pattern; older ones type it. Default to drawing and
-    // keep the keypad as a fallback so the S8-era flow still works.
-    var typed by remember { mutableStateOf(false) }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.padding(32.dp),
-    ) {
-        Text(
-            if (typed) {
-                "The live view is protected by a camera PIN stored on the robot. " +
-                    "Enter your existing PIN, or pick a new one and register it on the robot."
-            } else {
-                "The live view is protected by a camera PIN stored on the robot. " +
-                    "Draw your existing pattern, or draw a new one and register it on the robot."
-            },
-            color = Color.White,
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        if (typed) {
-            OutlinedTextField(
-                value = pin,
-                onValueChange = onPinChange,
-                label = { Text("Camera PIN") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else {
-            PatternPinInput(onPattern = onPinChange)
-            Text(
-                if (pin.isBlank()) "Draw a pattern of at least 4 dots" else "Pattern captured",
-                color = Color.White.copy(alpha = 0.7f),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        Button(onClick = onConnect, enabled = pin.isNotBlank()) { Text("Start live view") }
-        TextButton(onClick = onSetPinOnRobot, enabled = pin.isNotBlank()) {
-            Text("Set as new PIN on robot", color = Color.White)
-        }
-        TextButton(
-            onClick = {
-                typed = !typed
-                onPinChange("")
-            },
-        ) {
-            Text(
-                if (typed) "Draw a pattern instead" else "Type a PIN instead",
-                color = Color.White.copy(alpha = 0.7f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun CameraMessage(icon: @Composable () -> Unit, text: String) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(24.dp),
-    ) {
-        icon()
-        Spacer(Modifier.height(12.dp))
-        Text(text, color = Color.White, textAlign = TextAlign.Center)
     }
 }
