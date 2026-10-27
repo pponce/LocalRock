@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: emqx/CocoaMQTT
-          ref: '2.1.8'
+          ref: '2.4.1'
           path: local-work/dependencies/CocoaMQTT
       - name: Locate the existing local package in this CI checkout
         run: |
