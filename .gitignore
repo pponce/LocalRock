@@ -23,3 +23,6 @@ node_modules/
 /~/
 graphify-out/
 composeApp/release/
+
+# Private local helpers, reports, and device captures
+/local-work/
