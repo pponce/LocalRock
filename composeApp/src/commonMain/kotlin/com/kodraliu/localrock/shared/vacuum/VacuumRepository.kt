@@ -155,9 +155,10 @@ class VacuumRepository(
     val activeRunRoomIds: StateFlow<Set<Int>?> = runRooms.map { it.roomIds }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    private fun updateStatus(transform: (VacuumStatus) -> VacuumStatus) {
-        _status.update(transform)
-        runRooms.update { it.withStatus(_status.value) }
+    private fun updateStatus(fresh: VacuumStatus) {
+        _status.update { it.merge(fresh) }
+        // Map emphasis needs fresh scope fields, not values retained for the status controls.
+        runRooms.update { it.withStatus(fresh) }
     }
 
     /** The loaded map's mapFlag, from the robot's map_status when it reports one. */
@@ -184,7 +185,8 @@ class VacuumRepository(
         dpsJob = scope.launch {
             session.dpsUpdates.collect { dps ->
                 println("[VacLocal] dps push: ${dps.keys}")
-                updateStatus { it.applyDpsPush(dps) }
+                _status.update { it.applyDpsPush(dps) }
+                runRooms.update { it.withStatePush((dps[121] as? JsonPrimitive)?.intOrNull) }
             }
         }
         pollJob = scope.launch {
@@ -200,8 +202,9 @@ class VacuumRepository(
                         consecutiveFailures = 0
                         if (fresh != null) {
                             println("[VacLocal] get_status ok: state=${fresh.state} battery=${fresh.battery}")
-                            updateStatus { it.merge(fresh) }
+                            updateStatus(fresh)
                         } else {
+                            runRooms.update { it.invalidate() }
                             println("[VacLocal] get_status returned null (empty result)")
                         }
                     }
@@ -255,8 +258,8 @@ class VacuumRepository(
 
 
     suspend fun refreshStatus() {
-        runCatching { session.getStatus() }.getOrNull()
-            ?.let { fresh -> updateStatus { it.merge(fresh) } }
+        val fresh = runCatching { session.getStatus() }.getOrNull()
+        if (fresh != null) updateStatus(fresh) else runRooms.update { it.invalidate() }
     }
 
     fun detach() {
@@ -274,7 +277,7 @@ class VacuumRepository(
 
     suspend fun resumeCleaning(): V1Response {
         val fresh = session.getStatus() ?: throw IllegalStateException("The robot's current task is unavailable")
-        updateStatus { it.merge(fresh) }
+        updateStatus(fresh)
         return when (fresh.inCleaning) {
             1 -> session.appStart().requireOk("app_start")
             2 -> session.sendCommand("resume_zoned_clean").requireOk("resume_zoned_clean")
