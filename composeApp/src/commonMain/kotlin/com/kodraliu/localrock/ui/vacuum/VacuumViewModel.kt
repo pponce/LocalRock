@@ -7,6 +7,7 @@ import com.kodraliu.localrock.shared.messages.MessageSeverity
 import com.kodraliu.localrock.shared.model.Scene
 import com.kodraliu.localrock.shared.model.SceneRunResult
 import com.kodraliu.localrock.shared.vacuum.DockCapabilities
+import com.kodraliu.localrock.shared.vacuum.FeatureSection
 import com.kodraliu.localrock.shared.vacuum.MapEditException
 import com.kodraliu.localrock.shared.vacuum.RoomType
 import com.kodraliu.localrock.shared.vacuum.VacuumErrorCodes
@@ -19,8 +20,11 @@ import com.kodraliu.localrock.shared.vacuum.unlistedAdvertisedFeatures
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -37,14 +41,21 @@ class VacuumViewModel(
     val deviceName: String = device.name
     val modelName: String? = container.deviceRepository.productsByDuid.value[duid]?.model
     val firmwareVersion: String? = device.fv
-    val supportsSmartPlan: Boolean = isSmartPlanSupported(device.newFeatureSet)
+    private val serverFeatureSet = device.newFeatureSet
     val supportsFastRoute: Boolean = isFastRouteSupported(device.newFeatureSet)
-    val supportsWaterSlide: Boolean = isWaterSlideSupported(device.newFeatureSet)
     val dockCapabilities = DockCapabilities(modelName, device.featureSet, device.newFeatureSet)
     val betaFeatureDefs = supportedBetaFeatures(device.newFeatureSet)
     val unlistedFeatures = unlistedAdvertisedFeatures(device.newFeatureSet)
-    val showsBetaFeatures = betaFeatureDefs.any { it.bit != null } || unlistedFeatures.isNotEmpty()
+    val showsBetaFeatures = betaFeatureDefs.any { it.section == FeatureSection.BETA && it.bit != null } || unlistedFeatures.isNotEmpty()
     val repository: VacuumRepository = container.vacuumRepositoryFor(device)
+
+    // The robot's own answer wins; the server's record is the fallback until it has replied.
+    val supportsSmartPlan: StateFlow<Boolean> = repository.robotFeatureSet
+        .map { isSmartPlanSupported(it ?: serverFeatureSet) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, isSmartPlanSupported(serverFeatureSet))
+    val supportsWaterSlide: StateFlow<Boolean> = repository.robotFeatureSet
+        .map { isWaterSlideSupported(it ?: serverFeatureSet) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, isWaterSlideSupported(serverFeatureSet))
     val status = repository.status
 
     private val errorBannerKey = "robot-error-${device.duid}"
@@ -106,6 +117,7 @@ class VacuumViewModel(
                 container.awaitMqttConnected()
                 runCatching { repository.fetchConsumableStatus() }
                 runCatching { repository.rooms() }
+                runCatching { repository.fetchRobotFeatureSet() }
             }
         }
 

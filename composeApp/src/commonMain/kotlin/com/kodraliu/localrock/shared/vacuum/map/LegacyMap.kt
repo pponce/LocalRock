@@ -17,6 +17,7 @@ fun parseLegacyMap(bytes: ByteArray): ParsedMap {
     var charger: ParsedMapPoint? = null
     var robot: ParsedMapPoint? = null
     var path: List<ParsedMapPoint> = emptyList()
+    var reportedCleanSegments: Set<Int>? = null
     var noGoZones: List<MapZone> = emptyList()
     var noMopZones: List<MapZone> = emptyList()
     var virtualWalls: List<VirtualWall> = emptyList()
@@ -26,6 +27,8 @@ fun parseLegacyMap(bytes: ByteArray): ParsedMap {
     var segmentMaterials: Map<Int, Int> = emptyMap()
     var segmentMaterialDirections: Map<Int, Int> = emptyMap()
     val unmodeledRestrictionBlocks = mutableSetOf<Int>()
+    val obstacles = mutableListOf<MapObstacle>()
+    val furnitureBlocks = mutableListOf<MapFurnitureBlock>()
 
     var off = headerLen
     while (off + 8 <= bytes.size) {
@@ -35,11 +38,13 @@ fun parseLegacyMap(bytes: ByteArray): ParsedMap {
         if (blockHeaderLen < 8 || blockHeaderLen > bytes.size - off) {
             throw MapParseException("Invalid block at off=$off: header_len=$blockHeaderLen")
         }
-        if (blockDataLen < 0 || off + blockHeaderLen + blockDataLen > bytes.size) {
+        if (blockDataLen < 0 || blockDataLen > bytes.size - off - blockHeaderLen) {
             throw MapParseException("Block body out of range at off=$off")
         }
         when (type) {
             BLOCK_DIGEST -> break
+            BLOCK_CLEAN_SEGMENTS -> reportedCleanSegments = parseRunSegments(bytes, off, blockHeaderLen, blockDataLen)
+            BLOCK_FURNITURE -> furnitureBlocks += parseFurnitureBlock(bytes, off, blockHeaderLen, blockDataLen)
             BLOCK_IMAGE -> {
                 if (blockHeaderLen >= 28) {
                     val ih = off + 8
@@ -121,6 +126,12 @@ fun parseLegacyMap(bytes: ByteArray): ParsedMap {
             in UNMODELED_RESTRICTION_BLOCKS ->
                 if (entryCount(bytes, off, blockHeaderLen, blockDataLen) > 0) unmodeledRestrictionBlocks += type
         }
+        if (type in OBSTACLE_BLOCKS) {
+            obstacles += parseObstacles(
+                bytes, off + blockHeaderLen, entryCount(bytes, off, blockHeaderLen, blockDataLen), blockDataLen,
+                ignored = type == BLOCK_IGNORED_OBSTACLES || type == BLOCK_IGNORED_OBSTACLES_WITH_PHOTO,
+            )
+        }
         off += blockHeaderLen + blockDataLen
     }
 
@@ -134,9 +145,9 @@ fun parseLegacyMap(bytes: ByteArray): ParsedMap {
     for (i in pixels.indices) {
         val v = pixels[i].toInt() and 0xff
         grid[i] = when {
-            v == 0 -> 0
             (v and 0x07) == 1 -> 127.toByte()
-            else -> 128.toByte()
+            (v and 0x07) == 7 -> 128.toByte()
+            else -> 0
         }
     }
 
@@ -146,7 +157,7 @@ fun parseLegacyMap(bytes: ByteArray): ParsedMap {
     for (y in 0 until imageHeight) {
         for (x in 0 until imageWidth) {
             val v = pixels[y * imageWidth + x].toInt() and 0xff
-            if (v != 0 && (v and 0x07) != 1) {
+            if ((v and 0x07) == 7) {
                 val roomId = (v ushr 3) and 0x1f
                 if (roomId > 0) {
                     roomSumX[roomId] = (roomSumX[roomId] ?: 0L) + x
@@ -173,6 +184,8 @@ fun parseLegacyMap(bytes: ByteArray): ParsedMap {
         chargerMm = charger,
         robotMm = robot,
         pathMm = path,
+        reportedCleanSegments = reportedCleanSegments,
+        legacyRevision = LegacyMapRevision(u32(bytes, 12).toLong() and 0xffffffffL, u32(bytes, 16).toLong() and 0xffffffffL),
         noGoZones = noGoZones,
         noMopZones = noMopZones,
         virtualWalls = virtualWalls,
@@ -183,6 +196,8 @@ fun parseLegacyMap(bytes: ByteArray): ParsedMap {
         carpetAreas = carpetAreas,
         carpetFlagsPresent = carpetsFromFlags != null,
         thresholds = thresholds,
+        obstacles = obstacles,
+        furnitureBlocks = furnitureBlocks,
         originalGrid = pixels,
     )
 }
@@ -249,8 +264,20 @@ private const val BLOCK_PATH = 3
 private const val BLOCK_ROBOT_POSITION = 8
 private const val BLOCK_FORBIDDEN_ZONES = 9        // persistent no-go zones
 private const val BLOCK_VIRTUAL_WALLS = 10
+private const val BLOCK_CLEAN_SEGMENTS = 11
 private const val BLOCK_FORBIDDEN_MOP_ZONES = 12   // persistent no-mop zones
 private const val BLOCK_SEGMENT_MATERIALS = 24
+private const val BLOCK_FURNITURE = 25
+
+// Obstacle blocks, ids from vacuum-map-parser-roborock: 13 obstacles, 14 ignored obstacles, 15 and 16
+// the same with a photo id per record.
+private const val BLOCK_OBSTACLES = 13
+private const val BLOCK_IGNORED_OBSTACLES = 14
+private const val BLOCK_OBSTACLES_WITH_PHOTO = 15
+private const val BLOCK_IGNORED_OBSTACLES_WITH_PHOTO = 16
+private val OBSTACLE_BLOCKS = setOf(
+    BLOCK_OBSTACLES, BLOCK_IGNORED_OBSTACLES, BLOCK_OBSTACLES_WITH_PHOTO, BLOCK_IGNORED_OBSTACLES_WITH_PHOTO,
+)
 
 // Identified on an S8 Pro Ultra by adding one of each with the official app and finding the exact
 // captured corners in these blocks (2026-09-28).

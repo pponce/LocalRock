@@ -97,6 +97,8 @@ fun ScheduleScreen(
     onBack: () -> Unit,
 ) {
     val repository = viewModel.repository
+    val supportsSmartPlan by viewModel.supportsSmartPlan.collectAsState()
+    val supportsWaterSlide by viewModel.supportsWaterSlide.collectAsState()
     val scope = rememberCoroutineScope()
     val timers by repository.timers.collectAsState()
     val rooms by repository.rooms.collectAsState()
@@ -199,9 +201,9 @@ fun ScheduleScreen(
     if (showAddDialog) {
         TimerDialog(
             initial = null,
-            supportsSmartPlan = viewModel.supportsSmartPlan,
+            supportsSmartPlan = supportsSmartPlan,
             supportsFastRoute = viewModel.supportsFastRoute,
-            supportsWaterSlide = viewModel.supportsWaterSlide,
+            supportsWaterSlide = supportsWaterSlide,
             rooms = rooms, map = map, mapName = mapName, currentFlag = currentFlag,
             onSave = { hour, minute, weekdays, settings, once, _, _, _ ->
                 showAddDialog = false
@@ -214,9 +216,9 @@ fun ScheduleScreen(
     editing?.let { timer ->
         TimerDialog(
             initial = timer,
-            supportsSmartPlan = viewModel.supportsSmartPlan,
+            supportsSmartPlan = supportsSmartPlan,
             supportsFastRoute = viewModel.supportsFastRoute,
-            supportsWaterSlide = viewModel.supportsWaterSlide,
+            supportsWaterSlide = supportsWaterSlide,
             rooms = rooms, map = map, mapName = mapName, currentFlag = currentFlag,
             onSave = { hour, minute, weekdays, settings, once, settingsChanged, timingChanged, enabled ->
                 editing = null
