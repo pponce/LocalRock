@@ -16,6 +16,8 @@ final class WebRtcNativeFactory: NSObject, RtcNativePeerFactory {
     private let factory: RTCPeerConnectionFactory
 
     override init() {
+        // Native diagnostics may contain SDP/ICE; the app exposes allowlisted stats instead.
+        RTCSetMinDebugLogLevel(.none)
         RTCInitializeSSL()
         let encoder = RTCDefaultVideoEncoderFactory()
         let decoder = RTCDefaultVideoDecoderFactory()

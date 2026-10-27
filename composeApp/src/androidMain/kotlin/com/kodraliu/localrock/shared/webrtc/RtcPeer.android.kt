@@ -10,6 +10,7 @@ import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
 import org.webrtc.IceCandidate
+import org.webrtc.Logging
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.MediaStreamTrack
@@ -35,6 +36,8 @@ private val peerConnectionFactory: PeerConnectionFactory by lazy {
     PeerConnectionFactory.initialize(
         PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
     )
+    // Native diagnostics can contain SDP/ICE. Use only the sanitized stats shown by the app.
+    Logging.enableLogToDebugOutput(Logging.Severity.LS_NONE)
     PeerConnectionFactory.builder()
         .setVideoDecoderFactory(DefaultVideoDecoderFactory(rtcEglBase.eglBaseContext))
         .setVideoEncoderFactory(DefaultVideoEncoderFactory(rtcEglBase.eglBaseContext, true, true))
