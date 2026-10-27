@@ -5,6 +5,10 @@ import com.kodraliu.localrock.shared.vacuum.map.ParsedMap
 
 /** Robot-reported run kind; UI selections, schedules and robot position are never inputs. */
 internal fun VacuumStatus.mapRunKind(): Int? {
+    when (state) {
+        VacuumStateCodes.MAPPING, VacuumStateCodes.SPOT_CLEANING, VacuumStateCodes.GOING_TO_TARGET,
+        VacuumStateCodes.MANUAL_MODE, VacuumStateCodes.REMOTE_CONTROL_ACTIVE -> return null
+    }
     if (inCleaning != null) return inCleaning.takeIf { it in 1..3 }
     return when (state) {
         VacuumStateCodes.ZONED_CLEANING -> 2
@@ -40,6 +44,11 @@ internal data class ActiveRunRooms(
     }
 
     fun invalidate(): ActiveRunRooms = copy(generation = generation + 1, roomIds = null, statusKnown = false)
+
+    /** DPS pushes lack run scope. A state change needs a full status read; battery-only pushes
+     * cannot restore trust after a failed read or silently reuse the preceding task's scope. */
+    fun withStatePush(state: Int?): ActiveRunRooms =
+        if (state != null && state != status.state) invalidate() else this
 
     fun withMap(map: ParsedMap?, requestedGeneration: Long): ActiveRunRooms {
         if (requestedGeneration != generation) return this

@@ -38,6 +38,8 @@ class ActiveRunRoomsTest {
             VacuumStatus(state = VacuumStateCodes.CLEANING),
             cleaning.copy(inCleaning = 2, state = VacuumStateCodes.ZONED_CLEANING),
             VacuumStatus(state = VacuumStateCodes.SPOT_CLEANING),
+            VacuumStatus(state = VacuumStateCodes.SPOT_CLEANING, inCleaning = 1),
+            VacuumStatus(state = VacuumStateCodes.MAPPING, inCleaning = 1),
             cleaning.copy(inCleaning = 4),
         ).forEach { status -> assertNull(ActiveRunRooms().withStatus(status).receive(map()).roomIds) }
     }
@@ -100,5 +102,22 @@ class ActiveRunRoomsTest {
         assertNull(failed.withMap(map(), run.generation).roomIds)
         assertNull(failed.receive(map()).roomIds)
         assertEquals(setOf(1, 3), failed.withStatus(cleaning).receive(map()).roomIds)
+    }
+
+    @Test
+    fun partial_pushes_never_reestablish_run_scope_after_failure() {
+        val run = ActiveRunRooms().withStatus(cleaning).receive(map())
+        assertEquals(setOf(1, 3), run.withStatePush(null).roomIds)
+        val failed = run.invalidate()
+        assertNull(failed.withStatePush(null).receive(map()).roomIds)
+        assertNull(failed.withStatePush(cleaning.state).receive(map()).roomIds)
+        assertNull(run.withStatePush(VacuumStateCodes.CHARGING).roomIds)
+        assertNull(run.withStatePush(VacuumStateCodes.CLEANING).withMap(map(), run.generation).roomIds)
+    }
+
+    @Test
+    fun a_fresh_status_without_scope_does_not_reuse_the_previous_scope() {
+        val run = ActiveRunRooms().withStatus(cleaning).receive(map())
+        assertNull(run.withStatus(VacuumStatus(state = VacuumStateCodes.CLEANING)).receive(map()).roomIds)
     }
 }
