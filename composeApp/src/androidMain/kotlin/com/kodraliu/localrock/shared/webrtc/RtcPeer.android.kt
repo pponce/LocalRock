@@ -82,15 +82,17 @@ internal class AndroidRtcPeer(iceServers: List<RtcIceServer>) : RtcPeer {
         val offer = suspendCancellableCoroutine<SessionDescription> { cont ->
             pc.createOffer(object : SdpObserverAdapter() {
                 override fun onCreateSuccess(desc: SessionDescription) { if (cont.isActive) cont.resume(desc) }
-                override fun onCreateFailure(error: String?) =
+                override fun onCreateFailure(error: String?) {
                     if (cont.isActive) cont.resumeWithException(RuntimeException("Video offer creation failed"))
+                }
             }, MediaConstraints())
         }
         suspendCancellableCoroutine<Unit> { cont ->
             pc.setLocalDescription(object : SdpObserverAdapter() {
                 override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
-                override fun onSetFailure(error: String?) =
+                override fun onSetFailure(error: String?) {
                     if (cont.isActive) cont.resumeWithException(RuntimeException("Local video description rejected"))
+                }
             }, offer)
         }
         return offer.description
@@ -100,8 +102,9 @@ internal class AndroidRtcPeer(iceServers: List<RtcIceServer>) : RtcPeer {
         suspendCancellableCoroutine<Unit> { cont ->
             pc.setRemoteDescription(object : SdpObserverAdapter() {
                 override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
-                override fun onSetFailure(error: String?) =
+                override fun onSetFailure(error: String?) {
                     if (cont.isActive) cont.resumeWithException(RuntimeException("Video answer rejected"))
+                }
             }, SessionDescription(SessionDescription.Type.ANSWER, sdp))
         }
     }

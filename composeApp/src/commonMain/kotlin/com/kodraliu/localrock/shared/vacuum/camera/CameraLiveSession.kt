@@ -60,6 +60,7 @@ class CameraLiveSession internal constructor(
 
     private class Attempt(val id: String) {
         var previewRequested = false
+        var startAcknowledged = false
         var peer: RtcPeer? = null
         var stage = "Preparing"
     }
@@ -93,7 +94,7 @@ class CameraLiveSession internal constructor(
                 _peer.value = null
                 try { attempt.peer?.close() } catch (_: Exception) { /* Continue preview cleanup. */ }
                 withContext(NonCancellable) { releaseOwnedPreview(attempt) }
-                _state.value = failure?.let(State::Failed) ?: State.Idle
+                _state.value = failure?.let { State.Failed(it) } ?: State.Idle
                 attemptJob = null
                 if (disposed) scope.cancel()
             }
@@ -149,9 +150,17 @@ class CameraLiveSession internal constructor(
             withContext(NonCancellable) {
                 withTimeout(10_000) {
                     attempt.previewRequested = true
-                    requireAck(command("start_camera_preview", buildJsonObject {
-                        put("client_id", attempt.id); put("quality", "HD"); put("password", hash)
-                    }).result, "Camera start")
+                    val response = try {
+                        command("start_camera_preview", buildJsonObject {
+                            put("client_id", attempt.id); put("quality", "HD"); put("password", hash)
+                        })
+                    } catch (e: CameraFailure) {
+                        // An explicit robot refusal differs from a lost/late acknowledgement.
+                        attempt.previewRequested = false
+                        throw e
+                    }
+                    requireAck(response.result, "Camera start")
+                    attempt.startAcknowledged = true
                 }
             }
             ensureActive()
@@ -185,8 +194,9 @@ class CameraLiveSession internal constructor(
                 }
             }
             stage("Sending video offer")
+            val offer = peer.createOffer()
             command("send_sdp_to_robot", obj("app_sdp", encode(buildJsonObject {
-                put("type", "offer"); put("sdp", peer.createOffer())
+                put("type", "offer"); put("sdp", offer)
             })))
             offerSent.complete(Unit)
             stage("Waiting for robot answer")
@@ -268,11 +278,16 @@ class CameraLiveSession internal constructor(
         val released = try {
             withTimeout(cleanupTimeoutMs) {
                 // A different app may already own the camera. Never send stop for its client id.
-                if (owner(command("get_homesec_connect_status").result) == attempt.id) {
+                val currentOwner = owner(command("get_homesec_connect_status").result)
+                if (currentOwner == attempt.id) {
                     requireAck(command("stop_camera_preview", obj("client_id", attempt.id)).result, "Camera stop")
-                    if (owner(command("get_homesec_connect_status").result) == attempt.id) {
+                    val currentOwner = owner(command("get_homesec_connect_status").result)
+                if (currentOwner == attempt.id) {
                         throw CameraFailure("Preview release not confirmed")
                     }
+                } else if (!attempt.startAcknowledged && currentOwner == "none") {
+                    // An unanswered start can still arrive late. Do not report a confirmed release.
+                    throw CameraFailure("Preview start was not acknowledged")
                 }
                 true
             }
