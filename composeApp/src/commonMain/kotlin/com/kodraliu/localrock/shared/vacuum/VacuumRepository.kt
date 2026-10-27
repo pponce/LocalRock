@@ -1,7 +1,50 @@
 package com.kodraliu.localrock.shared.vacuum
 
 import com.kodraliu.localrock.shared.device.DeviceApiException
-import com.kodraliu.localrock.shared.schedule.*
+import com.kodraliu.localrock.shared.schedule.ScheduleEnablement
+import com.kodraliu.localrock.shared.schedule.ScheduleException
+import com.kodraliu.localrock.shared.schedule.ServerJobCreation
+import com.kodraliu.localrock.shared.schedule.ServerJobDeletion
+import com.kodraliu.localrock.shared.schedule.confirm
+import com.kodraliu.localrock.shared.schedule.confirmed
+import com.kodraliu.localrock.shared.schedule.create
+import com.kodraliu.localrock.shared.schedule.createJob
+import com.kodraliu.localrock.shared.schedule.cron
+import com.kodraliu.localrock.shared.schedule.current
+import com.kodraliu.localrock.shared.schedule.days
+import com.kodraliu.localrock.shared.schedule.delete
+import com.kodraliu.localrock.shared.schedule.deleteJob
+import com.kodraliu.localrock.shared.schedule.deleteTimer
+import com.kodraliu.localrock.shared.schedule.enabled
+import com.kodraliu.localrock.shared.schedule.end
+import com.kodraliu.localrock.shared.schedule.entries
+import com.kodraliu.localrock.shared.schedule.fresh
+import com.kodraliu.localrock.shared.schedule.hour
+import com.kodraliu.localrock.shared.schedule.id
+import com.kodraliu.localrock.shared.schedule.job
+import com.kodraliu.localrock.shared.schedule.jobs
+import com.kodraliu.localrock.shared.schedule.mapIndex
+import com.kodraliu.localrock.shared.schedule.minute
+import com.kodraliu.localrock.shared.schedule.name
+import com.kodraliu.localrock.shared.schedule.nativeName
+import com.kodraliu.localrock.shared.schedule.nativeTimerState
+import com.kodraliu.localrock.shared.schedule.or
+import com.kodraliu.localrock.shared.schedule.params
+import com.kodraliu.localrock.shared.schedule.parts
+import com.kodraliu.localrock.shared.schedule.raw
+import com.kodraliu.localrock.shared.schedule.readJobs
+import com.kodraliu.localrock.shared.schedule.readTimers
+import com.kodraliu.localrock.shared.schedule.repeated
+import com.kodraliu.localrock.shared.schedule.save
+import com.kodraliu.localrock.shared.schedule.saved
+import com.kodraliu.localrock.shared.schedule.settings
+import com.kodraliu.localrock.shared.schedule.start
+import com.kodraliu.localrock.shared.schedule.state
+import com.kodraliu.localrock.shared.schedule.timezone
+import com.kodraliu.localrock.shared.schedule.update
+import com.kodraliu.localrock.shared.schedule.value
+import com.kodraliu.localrock.shared.schedule.writeJob
+import com.kodraliu.localrock.shared.schedule.writeTimer
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import com.kodraliu.localrock.shared.model.Room
@@ -889,18 +932,17 @@ class VacuumRepository(
 
     /** Only an unavailable collection permits legacy fallback; an empty jobs list does not. */
     suspend fun fetchTimers() {
-        if (scheduleMirror != null && !demo) {
-            try {
-                _timers.value = scheduleMirror.list(duid).map { it.toCleanTimer() }
+        _timers.value = loadScheduleList(
+            readJobs = if (scheduleMirror != null && !demo) ({
+                scheduleMirror.list(duid).map { it.toCleanTimer() }
                     .sortedWith(compareBy<CleanTimer> { it.hour }.thenBy { it.minute }.thenBy { it.id })
-                return
-            } catch (e: DeviceApiException) {
-                if (e.responseCode != 404 && e.responseCode != 405) throw e
-            }
-        }
-        val resp = session.getTimer()
-        resp.requireOk("get_timer")
-        _timers.value = parseTimerList(resp.result)
+            }) else null,
+            readLegacy = {
+                val resp = session.getTimer()
+                resp.requireOk("get_timer")
+                parseTimerList(resp.result)
+            },
+        )
     }
 
     suspend fun nativeScheduleState(timer: CleanTimer): String {
@@ -1074,13 +1116,17 @@ class VacuumRepository(
         val newSettings = settings.copy(serverTimerId = timer.settings.serverTimerId, segments = settings.segments ?: timer.settings.segments, mapIndex = timer.settings.mapIndex, cleanMop = timer.settings.cleanMop)
         if (useServerTimer) session.delServerTimer(id).requireOk("del_server_timer")
         else session.delTimer(id).requireOk("del_timer")
-        try {
-            saveTimerEntry(useServerTimer, id, cron, enabled = timer.enabled, settings = newSettings)
-            if (useServerTimer && !timer.enabled) session.updServerTimer(id, false).requireOk("upd_server_timer")
-        } catch (e: CancellationException) { throw e }
-        catch (_: Exception) {
-            throw ScheduleException("The old native timer was removed, but its replacement could not be confirmed. Refresh before retrying; no rollback was attempted.")
-        }
+        replaceLegacySchedule(
+            replace = {
+                saveTimerEntry(useServerTimer, id, cron, enabled = timer.enabled, settings = newSettings)
+                if (useServerTimer && !timer.enabled) session.updServerTimer(id, false).requireOk("upd_server_timer")
+            },
+            restore = {
+                val oldCron = buildCron(timer.minute, timer.hour, timer.weekdays, timer.date)
+                saveTimerEntry(useServerTimer, id, oldCron, enabled = timer.enabled, settings = timer.settings)
+                if (useServerTimer && !timer.enabled) session.updServerTimer(id, false).requireOk("upd_server_timer")
+            },
+        )
 
         if (useServerTimer) {
             updateCloudRecord(timer.id, id, minute, hour, newWeekdays, date, timer.enabled, newSettings)
@@ -1585,4 +1631,3 @@ internal fun VacuumStatus.applyDpsPush(push: Map<Int, JsonElement>): VacuumStatu
         dryStatus = dryStatus,
     )
 }
-

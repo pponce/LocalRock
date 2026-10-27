@@ -1,10 +1,20 @@
 package com.kodraliu.localrock.ui.vacuum
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -312,35 +322,35 @@ private fun TimerDialog(
     var localError by remember { mutableStateOf<String?>(null) }
 
     fun save() {
-                    val selectedSettings = timerSettingsFor(
-                        kind = kind,
-                        fanPower = fanPower,
-                        waterBoxMode = if (supportsWaterSlide) WaterBoxMode.forSlide(waterBoxMode) else waterBoxMode,
-                        mopMode = mopMode,
-                        repeat = repeat,
-                    )
-                    val cleaning = if (initial == null) selectedSettings else start.copy(
-                        fanPower = if ("fan" in touchedSettings) selectedSettings.fanPower else start.fanPower,
-                        waterBoxMode = if ("water" in touchedSettings) selectedSettings.waterBoxMode else start.waterBoxMode,
-                        mopMode = if ("route" in touchedSettings) selectedSettings.mopMode else start.mopMode,
-                        repeat = if ("repeat" in touchedSettings) selectedSettings.repeat else start.repeat,
-                    )
-                    if (roomsChanged && !wholeHome && (confirmedMap != currentFlag || selected.isEmpty() || selected.any { id -> rooms.none { it.id == id } })) {
-                        localError = "Choose rooms from the intended loaded map before saving."
-                        return
-                    }
-                    val settings = if (roomsChanged) cleaning.copy(segments = if (wholeHome) "0" else selected.joinToString(",")) else cleaning
-                    val days = when (repeatChoice) {
-                        RepeatChoice.ONCE, RepeatChoice.EVERY_DAY -> emptySet()
-                        RepeatChoice.WEEKDAYS -> WEEKDAYS
-                        RepeatChoice.WEEKENDS -> WEEKENDS
-                        RepeatChoice.CUSTOM -> weekdays
-                    }
-                    val timingChanged = initial == null || hour != initial.hour || minute != initial.minute ||
-                        repeatChoice != repeatChoiceOf(initial) ||
-                        (repeatChoice == RepeatChoice.CUSTOM && days != initial.weekdays)
-                    onSave(hour, minute, days, if (initial != null && !settingsChanged && !roomsChanged) start else settings,
-                        repeatChoice == RepeatChoice.ONCE, settingsChanged || roomsChanged, timingChanged, enabled)
+        val selectedSettings = timerSettingsFor(
+            kind = kind,
+            fanPower = fanPower,
+            waterBoxMode = if (supportsWaterSlide) WaterBoxMode.forSlide(waterBoxMode) else waterBoxMode,
+            mopMode = mopMode,
+            repeat = repeat,
+        )
+        val cleaning = if (initial == null) selectedSettings else start.copy(
+            fanPower = if ("fan" in touchedSettings) selectedSettings.fanPower else start.fanPower,
+            waterBoxMode = if ("water" in touchedSettings) selectedSettings.waterBoxMode else start.waterBoxMode,
+            mopMode = if ("route" in touchedSettings) selectedSettings.mopMode else start.mopMode,
+            repeat = if ("repeat" in touchedSettings) selectedSettings.repeat else start.repeat,
+        )
+        if (roomsChanged && !wholeHome && (confirmedMap != currentFlag || selected.isEmpty() || selected.any { id -> rooms.none { it.id == id } })) {
+            localError = "Choose rooms from the intended loaded map before saving."
+            return
+        }
+        val settings = if (roomsChanged) cleaning.copy(segments = if (wholeHome) "0" else selected.joinToString(",")) else cleaning
+        val days = when (repeatChoice) {
+            RepeatChoice.ONCE, RepeatChoice.EVERY_DAY -> emptySet()
+            RepeatChoice.WEEKDAYS -> WEEKDAYS
+            RepeatChoice.WEEKENDS -> WEEKENDS
+            RepeatChoice.CUSTOM -> weekdays
+        }
+        val timingChanged = initial == null || hour != initial.hour || minute != initial.minute ||
+            repeatChoice != repeatChoiceOf(initial) ||
+            (repeatChoice == RepeatChoice.CUSTOM && days != initial.weekdays)
+        onSave(hour, minute, days, if (initial != null && !settingsChanged && !roomsChanged) start else settings,
+            repeatChoice == RepeatChoice.ONCE, settingsChanged || roomsChanged, timingChanged, enabled)
 
     }
 
@@ -415,98 +425,97 @@ private fun TimerDialog(
             }
             "repeat" -> ModalBottomSheet(onDismissRequest = { sheet = null }) {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ChipRow(
-                    label = "Repeat",
-                    options = RepeatChoice.entries.map { it to it.label },
-                    selected = repeatChoice,
-                    onSelect = { repeatChoice = it },
-                )
-                if (repeatChoice == RepeatChoice.CUSTOM) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    val dayLabels = listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa")
-                    dayLabels.forEachIndexed { index, label ->
-                        val selected = index in weekdays
-                        Surface(
-                            onClick = { weekdays = if (selected) weekdays - index else weekdays + index },
-                            modifier = Modifier.weight(1f).aspectRatio(1f),
-                            shape = CircleShape,
-                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    label,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                )
+                    ChipRow(
+                        label = "Repeat",
+                        options = RepeatChoice.entries.map { it to it.label },
+                        selected = repeatChoice,
+                        onSelect = { repeatChoice = it },
+                    )
+                    if (repeatChoice == RepeatChoice.CUSTOM) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val dayLabels = listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa")
+                        dayLabels.forEachIndexed { index, label ->
+                            val selected = index in weekdays
+                            Surface(
+                                onClick = { weekdays = if (selected) weekdays - index else weekdays + index },
+                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                shape = CircleShape,
+                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
                             }
                         }
                     }
-                }
-
 
                     Button(enabled = repeatChoice != RepeatChoice.CUSTOM || weekdays.isNotEmpty(), onClick = { sheet = null }, modifier = Modifier.fillMaxWidth()) { Text("Done") }
                 }
             }
             "mode" -> ModalBottomSheet(onDismissRequest = { sheet = null }) {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ChipRow(
-                    label = "Cleaning",
-                    options = buildList {
-                        if (supportsSmartPlan || kind == TimerKind.SMART_PLAN) add(TimerKind.SMART_PLAN to "SmartPlan")
-                        add(TimerKind.CUSTOM to "Custom")
-                        add(TimerKind.VAC_AND_MOP to "Vacuum and mop")
-                        add(TimerKind.MOP to "Mop")
-                        add(TimerKind.VACUUM to "Vacuum")
-                    },
-                    selected = kind,
-                    onSelect = { kind = it; touchedSettings = touchedSettings + setOf("fan", "water", "route") },
-                )
-                if (kind == TimerKind.VACUUM || kind == TimerKind.VAC_AND_MOP) {
                     ChipRow(
-                        label = "Suction",
-                        options = listOf(
-                            VacuumFanPower.QUIET to "Quiet",
-                            VacuumFanPower.BALANCED to "Balanced",
-                            VacuumFanPower.TURBO to "Turbo",
-                            VacuumFanPower.MAX to "Max",
-                        ),
-                        selected = fanPower,
-                        onSelect = { fanPower = it; touchedSettings = touchedSettings + "fan" },
-                    )
-                }
-                if (kind == TimerKind.VAC_AND_MOP || kind == TimerKind.MOP) {
-                    ChipRow(
-                        label = "Water",
-                        options = listOf(
-                            WaterBoxMode.LOW to "Low",
-                            WaterBoxMode.MEDIUM to "Medium",
-                            WaterBoxMode.HIGH to "High",
-                        ),
-                        selected = waterBoxMode,
-                        onSelect = { waterBoxMode = it; touchedSettings = touchedSettings + "water" },
-                    )
-                    ChipRow(
-                        label = "Mop route",
-                        // A schedule can only use these two routes: a Qrevo Pro that accepts Deep and
-                        // Deep+ as its route setting refuses them inside a start command with -10005
-                        // "Param error", and the official app's schedule screen offers only these. A
-                        // route an existing schedule already carries stays visible so it is not dropped.
+                        label = "Cleaning",
                         options = buildList {
-                            add(MopRoute.STANDARD to "Standard")
-                            if (supportsFastRoute || mopMode == MopRoute.FAST) add(MopRoute.FAST to "Fast")
-                            if (mopMode == MopRoute.DEEP) add(MopRoute.DEEP to "Deep")
-                            if (mopMode == MopRoute.DEEP_PLUS) add(MopRoute.DEEP_PLUS to "Deep+")
+                            if (supportsSmartPlan || kind == TimerKind.SMART_PLAN) add(TimerKind.SMART_PLAN to "SmartPlan")
+                            add(TimerKind.CUSTOM to "Custom")
+                            add(TimerKind.VAC_AND_MOP to "Vacuum and mop")
+                            add(TimerKind.MOP to "Mop")
+                            add(TimerKind.VACUUM to "Vacuum")
                         },
-                        selected = mopMode,
-                        onSelect = { mopMode = it; touchedSettings = touchedSettings + "route" },
+                        selected = kind,
+                        onSelect = { kind = it; touchedSettings = touchedSettings + setOf("fan", "water", "route") },
                     )
-                }
-                ChipRow(
-                    label = "Passes",
-                    options = listOf(1 to "1", 2 to "2", 3 to "3"),
-                    selected = repeat,
-                    onSelect = { repeat = it; touchedSettings = touchedSettings + "repeat" },
-                )
+                    if (kind == TimerKind.VACUUM || kind == TimerKind.VAC_AND_MOP) {
+                        ChipRow(
+                            label = "Suction",
+                            options = listOf(
+                                VacuumFanPower.QUIET to "Quiet",
+                                VacuumFanPower.BALANCED to "Balanced",
+                                VacuumFanPower.TURBO to "Turbo",
+                                VacuumFanPower.MAX to "Max",
+                            ),
+                            selected = fanPower,
+                            onSelect = { fanPower = it; touchedSettings = touchedSettings + "fan" },
+                        )
+                    }
+                    if (kind == TimerKind.VAC_AND_MOP || kind == TimerKind.MOP) {
+                        ChipRow(
+                            label = "Water",
+                            options = listOf(
+                                WaterBoxMode.LOW to "Low",
+                                WaterBoxMode.MEDIUM to "Medium",
+                                WaterBoxMode.HIGH to "High",
+                            ),
+                            selected = waterBoxMode,
+                            onSelect = { waterBoxMode = it; touchedSettings = touchedSettings + "water" },
+                        )
+                        ChipRow(
+                            label = "Mop route",
+                            // A schedule can only use these two routes: a Qrevo Pro that accepts Deep and
+                            // Deep+ as its route setting refuses them inside a start command with -10005
+                            // "Param error", and the official app's schedule screen offers only these. A
+                            // route an existing schedule already carries stays visible so it is not dropped.
+                            options = buildList {
+                                add(MopRoute.STANDARD to "Standard")
+                                if (supportsFastRoute || mopMode == MopRoute.FAST) add(MopRoute.FAST to "Fast")
+                                if (mopMode == MopRoute.DEEP) add(MopRoute.DEEP to "Deep")
+                                if (mopMode == MopRoute.DEEP_PLUS) add(MopRoute.DEEP_PLUS to "Deep+")
+                            },
+                            selected = mopMode,
+                            onSelect = { mopMode = it; touchedSettings = touchedSettings + "route" },
+                        )
+                    }
+                    ChipRow(
+                        label = "Passes",
+                        options = listOf(1 to "1", 2 to "2", 3 to "3"),
+                        selected = repeat,
+                        onSelect = { repeat = it; touchedSettings = touchedSettings + "repeat" },
+                    )
 
                     if (kind == TimerKind.CUSTOM) Text("Uses the per-room cleaning settings saved on the robot.")
                     Button(onClick = { sheet = null }, modifier = Modifier.fillMaxWidth()) { Text("Done") }
@@ -634,4 +643,3 @@ private fun formatRepeat(timer: CleanTimer): String {
         else -> choice.label
     }
 }
-
