@@ -10,6 +10,7 @@ import kotlinx.serialization.json.*
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class, ExperimentalEncodingApi::class)
 class CameraLiveSessionTest {
@@ -84,7 +85,7 @@ class CameraLiveSessionTest {
     private fun TestScope.live(rpc: FakeRpc, peer: FakePeer = FakePeer()): CameraLiveSession {
         var id = 0
         return CameraLiveSession(rpc, { peer },
-            CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler)),
+            CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])),
             clientId = { "test-client-${++id}" }, connectTimeoutMs = 5_000, cleanupTimeoutMs = 500)
     }
 
@@ -96,7 +97,7 @@ class CameraLiveSessionTest {
         assertFalse(cameraPinAccepted(null))
     }
 
-    @Test fun invalidPinNeverStartsOrStopsPreview() = runTest {
+    @Test fun invalidPinNeverStartsOrStopsPreview() = runTest(timeout = 10.seconds) {
         for (result in listOf(JsonPrimitive(false), JsonNull, JsonObject(emptyMap()))) {
             val rpc = FakeRpc().apply { pinResult = result }
             val live = live(rpc)
@@ -107,7 +108,7 @@ class CameraLiveSessionTest {
         }
     }
 
-    @Test fun busyCameraIsNotTakenOverOrStoppedOnDispose() = runTest {
+    @Test fun busyCameraIsNotTakenOverOrStoppedOnDispose() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc().apply { owner = "oem-client" }
         val live = live(rpc)
         live.start("1234"); runCurrent()
@@ -118,7 +119,7 @@ class CameraLiveSessionTest {
         assertEquals("oem-client", rpc.owner)
     }
 
-    @Test fun unknownOwnershipFailsClosed() = runTest {
+    @Test fun unknownOwnershipFailsClosed() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc().apply { owner = null }
         val live = live(rpc)
         live.start("1234"); runCurrent()
@@ -127,7 +128,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun streamingUsesTurnAndStopsOnlyOwnedPreview() = runTest {
+    @Test fun streamingUsesTurnAndStopsOnlyOwnedPreview() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc(); val peer = FakePeer(); val live = live(rpc, peer)
         live.start("1234"); runCurrent()
         assertIs<CameraLiveSession.State.Streaming>(live.state.value)
@@ -142,7 +143,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun cleanupDoesNotStopNewOwner() = runTest {
+    @Test fun cleanupDoesNotStopNewOwner() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc(); val live = live(rpc)
         live.start("1234"); runCurrent(); rpc.owner = "oem-new-client"
         live.dispose(); runCurrent()
@@ -150,7 +151,7 @@ class CameraLiveSessionTest {
         assertEquals("oem-new-client", rpc.owner)
     }
 
-    @Test fun cancellationDuringStartWaitsThenReleasesAndBlocksRetry() = runTest {
+    @Test fun cancellationDuringStartWaitsThenReleasesAndBlocksRetry() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc().apply { startDelay = 2_000 }; val live = live(rpc)
         live.start("1234"); runCurrent()
         live.stop(); live.start("1234"); runCurrent()
@@ -163,7 +164,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun connectionTimeoutReleasesPreview() = runTest {
+    @Test fun connectionTimeoutReleasesPreview() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc().apply { waitForAnswer = true }; val peer = FakePeer(); val live = live(rpc, peer)
         live.start("1234"); runCurrent(); advanceTimeBy(5_001); runCurrent()
         assertContains(assertIs<CameraLiveSession.State.Failed>(live.state.value).message, "timed out")
@@ -172,7 +173,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun handshakeWithoutFramesDoesNotBecomeLive() = runTest {
+    @Test fun handshakeWithoutFramesDoesNotBecomeLive() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc(); val peer = FakePeer().apply { receivedVideo = false }; val live = live(rpc, peer)
         live.start("1234"); runCurrent()
         assertIs<CameraLiveSession.State.Connecting>(live.state.value)
@@ -182,7 +183,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun signalingRefusalReleasesAndDoesNotExposePayload() = runTest {
+    @Test fun signalingRefusalReleasesAndDoesNotExposePayload() = runTest(timeout = 10.seconds) {
         for (method in listOf("get_turn_server", "send_sdp_to_robot", "send_ice_to_robot", "get_device_ice")) {
             val rpc = FakeRpc().apply { failMethod = method }; val live = live(rpc)
             live.start("1234"); runCurrent()
@@ -194,7 +195,7 @@ class CameraLiveSessionTest {
         }
     }
 
-    @Test fun nativeAnswerErrorIsSanitizedAndReleases() = runTest {
+    @Test fun nativeAnswerErrorIsSanitizedAndReleases() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc(); val peer = FakePeer().apply { rejectAnswer = true }; val live = live(rpc, peer)
         live.start("1234"); runCurrent()
         val failed = assertIs<CameraLiveSession.State.Failed>(live.state.value)
@@ -203,7 +204,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun malformedSignalingIsReportedAndReleased() = runTest {
+    @Test fun malformedSignalingIsReportedAndReleased() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc().apply { malformedAnswer = true }; val live = live(rpc)
         live.start("1234"); runCurrent()
         assertContains(assertIs<CameraLiveSession.State.Failed>(live.state.value).message, "invalid video answer")
@@ -211,7 +212,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun activationDenialNeverChangesSettingsOrPin() = runTest {
+    @Test fun activationDenialNeverChangesSettingsOrPin() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc().apply { failMethod = "start_camera_preview"; failCode = -10012 }; val live = live(rpc)
         live.start("1234"); runCurrent()
         val text = assertIs<CameraLiveSession.State.Failed>(live.state.value).message
@@ -221,7 +222,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun failedCleanupIsVisibleAndNeverStopsUnknownClient() = runTest {
+    @Test fun failedCleanupIsVisibleAndNeverStopsUnknownClient() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc(); val live = live(rpc)
         live.start("1234"); runCurrent(); rpc.cleanupUnavailable = true
         live.stop(); runCurrent()
@@ -231,7 +232,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun retryUsesFreshClientIdAndDoesNotOverlapPreviousAttempt() = runTest {
+    @Test fun retryUsesFreshClientIdAndDoesNotOverlapPreviousAttempt() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc(); val live = live(rpc)
         live.start("1234"); live.start("1234"); runCurrent()
         live.stop(); runCurrent()
@@ -240,7 +241,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun connectionLossClosesPeerAndReleases() = runTest {
+    @Test fun connectionLossClosesPeerAndReleases() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc(); val peer = FakePeer(); val live = live(rpc, peer)
         live.start("1234"); runCurrent(); peer.connectionState.value = RtcConnectionState.DISCONNECTED; runCurrent()
         assertIs<CameraLiveSession.State.Failed>(live.state.value)
@@ -249,7 +250,7 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
-    @Test fun immediateCancellationBeforeDispatchCanBeRetried() = runTest {
+    @Test fun immediateCancellationBeforeDispatchCanBeRetried() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc(); val live = live(rpc)
         live.start("1234"); live.stop(); runCurrent()
         assertIs<CameraLiveSession.State.Idle>(live.state.value)
