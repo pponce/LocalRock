@@ -779,7 +779,7 @@ internal fun VacuumMapImage(
     viewportScope: Any? = null,
 ) {
     val bitmap = rememberMapBitmap(
-        map, drawRestrictions = layers.restrictions, drawCleaningPath = layers.cleaningPath,
+        map, drawRestrictions = layers.restrictions, drawCleaningPath = layers.cleaningPath, drawFurniture = layers.furniture,
         activeRunRoomIds = activeRunRoomIds,
     )
     val labelRooms = remember(map.rooms) { map.rooms.filter { it.labelNormX != null && it.labelNormY != null } }

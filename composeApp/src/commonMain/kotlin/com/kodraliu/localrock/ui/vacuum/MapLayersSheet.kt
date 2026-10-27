@@ -26,11 +26,12 @@ internal data class MapLayerVisibility(
     val cleaningPath: Boolean = true,
     val restrictions: Boolean = true,
     val detectedObstacles: Boolean = true,
+    val furniture: Boolean = true,
 ) {
     companion object {
         val Saver = listSaver<MapLayerVisibility, Boolean>(
-            save = { listOf(it.roomIcons, it.cleaningPath, it.restrictions, it.detectedObstacles) },
-            restore = { MapLayerVisibility(it[0], it[1], it[2], it[3]) },
+            save = { listOf(it.roomIcons, it.cleaningPath, it.restrictions, it.detectedObstacles, it.furniture) },
+            restore = { MapLayerVisibility(it[0], it[1], it[2], it[3], it.getOrElse(4) { true }) },
         )
     }
 }
@@ -42,6 +43,9 @@ internal fun MapLayersSheet(map: ParsedMap, layers: MapLayerVisibility, onChange
         Text("Choose what appears on the map. Cleaning settings stay the same.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+        if (map.furniture.isNotEmpty()) {
+            MapLayerSwitch("Furniture", layers.furniture) { onChange(layers.copy(furniture = it)) }
+        }
         MapLayerSwitch("Room icons", layers.roomIcons) { onChange(layers.copy(roomIcons = it)) }
         MapLayerSwitch("Cleaning path", layers.cleaningPath) { onChange(layers.copy(cleaningPath = it)) }
         if (map.format == MapFormat.LEGACY) {
