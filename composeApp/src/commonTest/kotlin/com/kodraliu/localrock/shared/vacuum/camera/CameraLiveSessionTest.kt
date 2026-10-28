@@ -43,10 +43,11 @@ class CameraLiveSessionTest {
         var malformedAnswer = false
         var failMethod: String? = null
         var failCode = -10005
+        var failResult: JsonElement? = null
         var cleanupUnavailable = false
         override suspend fun call(method: String, params: JsonElement): V1Response {
             calls += method
-            if (method == failMethod) return V1Response(null, null, buildJsonObject {
+            if (method == failMethod) return V1Response(null, failResult, buildJsonObject {
                 put("code", failCode); put("message", "private-robot-payload")
             })
             val result = when (method) {
@@ -90,11 +91,38 @@ class CameraLiveSessionTest {
     }
 
     @Test fun onlyExplicitSuccessfulPinRepliesPass() {
-        for (value in listOf("true", "1", "[true]", "[1]")) assertTrue(cameraPinAccepted(Json.parseToJsonElement(value)))
-        for (value in listOf("false", "0", "[false]", "[0]", "null", "{}", "[]", "[1,1]", "\"true\"", "\"1\"")) {
+        for (value in listOf("true", "1", "[true]", "[1]", "[\"ok\"]")) assertTrue(cameraPinAccepted(Json.parseToJsonElement(value)))
+        for (value in listOf("false", "0", "[false]", "[0]", "null", "{}", "[]", "[1,1]", "\"true\"", "\"1\"",
+            "\"ok\"", "[\"OK\"]", "[\"ok\",\"ok\"]", "[\"ok\",false]", "{\"result\":[\"ok\"]}", "[\"error\"]")) {
             assertFalse(cameraPinAccepted(Json.parseToJsonElement(value)), value)
         }
         assertFalse(cameraPinAccepted(null))
+    }
+
+    @Test fun s7MaxvPinAcknowledgementStartsAndReleasesOwnedPreview() = runTest(timeout = 10.seconds) {
+        val rpc = FakeRpc().apply { pinResult = Json.parseToJsonElement("[\"ok\"]") }
+        val peer = FakePeer(); val live = live(rpc, peer)
+        live.start("1234"); runCurrent()
+        assertIs<CameraLiveSession.State.Streaming>(live.state.value)
+        assertEquals(listOf("check_homesec_password", "get_homesec_connect_status", "start_camera_preview"), rpc.calls.take(3))
+        assertTrue("get_turn_server" in rpc.calls)
+        live.stop(); runCurrent()
+        assertTrue(peer.closed)
+        assertEquals(listOf("test-client-1"), rpc.stoppedIds)
+        live.dispose()
+    }
+
+    @Test fun pinErrorCannotBeOverriddenByOkResult() = runTest(timeout = 10.seconds) {
+        val rpc = FakeRpc().apply {
+            failMethod = "check_homesec_password"
+            failResult = Json.parseToJsonElement("[\"ok\"]")
+        }
+        val live = live(rpc)
+        live.start("1234"); runCurrent()
+        assertIs<CameraLiveSession.State.Failed>(live.state.value)
+        assertEquals(listOf("check_homesec_password"), rpc.calls)
+        live.dispose(); runCurrent()
+        assertTrue(rpc.stoppedIds.isEmpty())
     }
 
     @Test fun invalidPinNeverStartsOrStopsPreview() = runTest(timeout = 10.seconds) {

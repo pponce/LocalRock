@@ -20,8 +20,10 @@ only and clears it when the app becomes inactive. The Start button remains above
 **Hide keyboard** dismisses the numeric pad. Pattern gestures collect dots crossed between
 pointer events, including the release position. An incomplete new gesture clears the old entry.
 
-LocalRock checks the PIN and camera availability before starting. An invalid or unknown
-PIN reply fails closed. A rejected credential and an unrecognized robot response have distinct errors. If the camera belongs to another viewer, close that viewer and
+LocalRock checks the PIN and camera availability before starting. The S7 MaxV's
+single-value `["ok"]` PIN acknowledgement is supported. An invalid or unknown
+PIN reply fails closed, and an RPC error takes precedence over any success value.
+A rejected credential and an unrecognized robot response have distinct errors. If the camera belongs to another viewer, close that viewer and
 retry. There is no takeover control, PIN setup/reset or camera activation control here.
 Driving and microphone transmission are outside this feature.
 
