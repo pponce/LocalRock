@@ -62,7 +62,7 @@ class FurnitureEditsTest {
         val plan = furnitureEditPlan(before, listOf(changed, added))
         val data = plan.params()["data"]!!.jsonArray
         assertEquals(3, data.size)
-        assertEquals(Json.parseToJsonElement("[1,7,6350,3200,7850,3200,7850,4700,6350,4700,48,2,1]"), data[0])
+        assertEquals(Json.parseToJsonElement("[1,7,6350,4700,7850,4700,7850,3200,6350,3200,48,2,1]"), data[0])
         assertEquals(-1, data[1].jsonArray[1].jsonPrimitive.int)
         assertEquals(Json.parseToJsonElement("[0,1]"), data[2])
         assertEquals(setOf("data", "map_flag"), plan.params().keys)
@@ -111,6 +111,14 @@ class FurnitureEditsTest {
         val plan = furnitureEditPlan(base, listOf(a, b))
         assertTrue(furnitureEditsConfirmed(plan, map(record(a.moved(30, 0), 1), record(a.moved(-30, 0), 2))))
         assertFalse(furnitureEditsConfirmed(plan, map(record(a, 1))))
+    }
+
+    @Test fun unchanged_readback_does_not_confirm_a_small_nudge_inside_the_tolerance() {
+        val before = snapshot(record(placement(7)))
+        val changed = placement(7).moved(50, 0)
+        val plan = furnitureEditPlan(before, listOf(changed))
+        assertFalse(furnitureEditsConfirmed(plan, before.map))
+        assertTrue(furnitureEditsConfirmed(plan, map(record(changed))))
     }
 
     @Test fun stale_map_aborts_before_any_write_and_no_op_sends_nothing() = runTest {
@@ -181,5 +189,22 @@ class FurnitureEditsTest {
         }
         assertEquals(1, writes)
         assertEquals(5, reads)
+    }
+
+    @Test fun a_lost_start_ack_gets_cleanup_but_an_explicit_refusal_does_not_send_a_save() = runTest {
+        val base = snapshot(record(placement(7)))
+        for (refused in listOf(false, true)) {
+            val calls = mutableListOf<String>()
+            assertFailsWith<Exception> {
+                commitFurnitureEdits(base, listOf(placement(7).moved(100, 0)), { base }, { method, _ ->
+                    calls += method
+                    if (method == "start_edit_map") {
+                        if (!refused) throw IllegalStateException("lost acknowledgement")
+                        V1Response(1, null, JsonObject(mapOf("code" to JsonPrimitive(-1))))
+                    } else ok()
+                })
+            }
+            assertEquals(if (refused) listOf("start_edit_map") else listOf("start_edit_map", "end_edit_map"), calls)
+        }
     }
 }

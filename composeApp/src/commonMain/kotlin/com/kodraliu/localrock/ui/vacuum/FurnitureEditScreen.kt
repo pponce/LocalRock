@@ -231,7 +231,17 @@ internal fun FurnitureEditScreen(viewModel: VacuumViewModel, onBack: () -> Unit)
                 ListItem(headlineContent = { Text(item.kind?.label ?: "Furniture") },
                     supportingContent = { Text("${(item.widthMm / 10).roundToInt()} × ${(item.depthMm / 10).roundToInt()} cm") },
                     leadingContent = { item.kind?.let { FurniturePreview(it, Modifier.size(48.dp)) } },
-                    modifier = Modifier.clickable { selectedKey = item.key; showItems = false })
+                    modifier = Modifier.clickable {
+                        selectedKey = item.key; showItems = false
+                        map?.let { currentMap ->
+                            val fitted = currentMap.fittedSize(viewport.viewSize)
+                            val center = currentMap.mmToCanvas(item.corners.sumOf { it.x } / 4,
+                                item.corners.sumOf { it.y } / 4, fitted.width, fitted.height)
+                            viewport.offset = clampMapOffset(
+                                Offset(viewport.viewSize.width / 2, viewport.viewSize.height / 2) - center * viewport.scale,
+                                viewport.scale, fitted, viewport.viewSize)
+                        }
+                    })
             }
             if (map?.furniture?.any { it.isVisible && it.editablePlacement() == null } == true)
                 item { Text("Some existing furniture is view-only.", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }

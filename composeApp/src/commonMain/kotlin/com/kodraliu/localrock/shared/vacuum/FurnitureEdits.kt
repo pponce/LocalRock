@@ -70,10 +70,11 @@ private fun distance(a: ParsedMapPoint, b: ParsedMapPoint) = hypot((b.x - a.x).t
 
 fun newFurniture(key: Int, kind: FurnitureKind, x: Int, y: Int): FurniturePlacement {
     require(key < 0)
-    val left = x - kind.widthMm / 2; val top = y - kind.depthMm / 2
+    // Robot Y grows upwards: top corners have the larger Y, as in the map renderer.
+    val left = x - kind.widthMm / 2; val top = y + kind.depthMm / 2
     return FurniturePlacement(key, kind.type, kind.subtype, listOf(
         ParsedMapPoint(left, top), ParsedMapPoint(left + kind.widthMm, top),
-        ParsedMapPoint(left + kind.widthMm, top + kind.depthMm), ParsedMapPoint(left, top + kind.depthMm),
+        ParsedMapPoint(left + kind.widthMm, top - kind.depthMm), ParsedMapPoint(left, top - kind.depthMm),
     ))
 }
 
@@ -164,7 +165,8 @@ internal fun furnitureEditsConfirmed(plan: FurnitureEditPlan, map: ParsedMap): B
         if (updated == null) {
             // Includes every hidden/unknown record and every untouched visible item.
             if (saved.rawBytes != original.rawBytes) return false
-        } else if (!matchesPlacement(updated, saved) ||
+        } else if ((saved.cornersMm == original.cornersMm && updated.corners != original.cornersMm) ||
+            !matchesPlacement(updated, saved) ||
             saved.rawBytes.subList(16, 18) != original.rawBytes.subList(16, 18) ||
             saved.rawBytes[22] != original.rawBytes[22]) return false
     }
@@ -207,15 +209,18 @@ internal suspend fun commitFurnitureEdits(
         throw MapEditException("The robot's map changed while you were editing. Reload it to start from the latest furniture.")
     if (plan.isEmpty) return current
     val empty = JsonArray(emptyList())
-    send("start_edit_map", empty).requireFurnitureAck("start_edit_map")
     var writeFailure: Throwable? = null
     var endFailure: Throwable? = null
+    var mayHaveStarted = true
     try {
+        val started = send("start_edit_map", empty)
+        if (started.error != null) mayHaveStarted = false
+        started.requireFurnitureAck("start_edit_map")
         send("save_furnitures", plan.params()).requireFurnitureAck("save_furnitures")
     } catch (e: Throwable) {
         writeFailure = e
     } finally {
-        withContext(NonCancellable) {
+        if (mayHaveStarted) withContext(NonCancellable) {
             try { withTimeout(15_000) { send("end_edit_map", empty).requireFurnitureAck("end_edit_map") } }
             catch (e: Throwable) { endFailure = e }
         }
