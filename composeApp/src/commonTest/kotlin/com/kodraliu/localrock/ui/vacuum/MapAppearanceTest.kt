@@ -63,6 +63,16 @@ class MapAppearanceTest {
     }
 
     @Test
+    fun selection_is_highlighted_before_a_run_without_changing_reported_targets() {
+        val reported = setOf(4)
+        assertEquals(setOf(1, 2), highlightedRoomIds(setOf(1, 2), emptySet()))
+        assertEquals(setOf(1, 2, 4), highlightedRoomIds(setOf(1, 2), reported))
+        assertEquals(setOf(4), reported)
+        assertEquals(emptySet(), highlightedRoomIds(emptySet(), emptySet()))
+        DarkMapPalette.rooms.forEach { assertTrue(it.active.luminance() < it.pale.luminance()) }
+    }
+
+    @Test
     fun unknown_room_type_gets_no_guessed_icon() {
         assertNull(mapRoomIcon(null))
         assertNull(mapRoomIcon(999))

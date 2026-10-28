@@ -39,10 +39,12 @@ fun rememberMapBitmap(
     drawRestrictions: Boolean = true,
     drawCleaningPath: Boolean = true,
     activeRunRoomIds: Set<Int> = emptySet(),
+    selectedRoomIds: Set<Int> = emptySet(),
 ): ImageBitmap {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    return remember(map, dark, drawRestrictions, drawCleaningPath, activeRunRoomIds) {
-        renderMap(map, if (dark) DarkMapPalette else LightMapPalette, drawRestrictions, drawCleaningPath, activeRunRoomIds)
+    val highlightedRooms = highlightedRoomIds(selectedRoomIds, activeRunRoomIds)
+    return remember(map, dark, drawRestrictions, drawCleaningPath, highlightedRooms) {
+        renderMap(map, if (dark) DarkMapPalette else LightMapPalette, drawRestrictions, drawCleaningPath, highlightedRooms)
     }
 }
 
