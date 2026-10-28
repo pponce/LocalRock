@@ -73,7 +73,8 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
         peerConnection.addTransceiver(of: .video, init: recvVideo)
 
         let recvAudio = RTCRtpTransceiverInit()
-        recvAudio.direction = .recvOnly
+        // Offer bidirectional audio capability without attaching a capture track.
+        recvAudio.direction = .sendRecv
         peerConnection.addTransceiver(of: .audio, init: recvAudio)
 
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
