@@ -108,6 +108,18 @@ class CameraLiveSessionTest {
         }
     }
 
+    @Test fun unexpected_pin_reply_is_not_reported_as_a_wrong_credential() = runTest(timeout = 10.seconds) {
+        for (result in listOf(JsonPrimitive(false), JsonObject(emptyMap()))) {
+            val rpc = FakeRpc().apply { pinResult = result }
+            val live = live(rpc)
+            live.start("1234"); runCurrent()
+            val message = assertIs<CameraLiveSession.State.Failed>(live.state.value).message
+            assertContains(message, if (result == JsonPrimitive(false)) "rejected" else "unrecognized")
+            assertEquals(listOf("check_homesec_password"), rpc.calls)
+            live.dispose(); runCurrent()
+        }
+    }
+
     @Test fun busyCameraIsNotTakenOverOrStoppedOnDispose() = runTest(timeout = 10.seconds) {
         val rpc = FakeRpc().apply { owner = "oem-client" }
         val live = live(rpc)

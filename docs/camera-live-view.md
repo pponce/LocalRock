@@ -16,10 +16,12 @@ video entry. Additional models require separate compatibility verification.
 Open the vacuum's **More → Video (experimental)** screen. Enter the existing credential,
 choose numeric PIN or pattern, then tap **Start live view**. Opening the map or returning
 from the background never starts a stream. This screen keeps the credential in memory
-only and clears it when the app becomes inactive.
+only and clears it when the app becomes inactive. The Start button remains above the keyboard;
+**Hide keyboard** dismisses the numeric pad. Pattern gestures collect dots crossed between
+pointer events, including the release position. An incomplete new gesture clears the old entry.
 
 LocalRock checks the PIN and camera availability before starting. An invalid or unknown
-PIN reply fails closed. If the camera belongs to another viewer, close that viewer and
+PIN reply fails closed. A rejected credential and an unrecognized robot response have distinct errors. If the camera belongs to another viewer, close that viewer and
 retry. There is no takeover control, PIN setup/reset or camera activation control here.
 Driving and microphone transmission are outside this feature.
 
