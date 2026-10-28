@@ -333,6 +333,9 @@ class CameraLiveSession internal constructor(
 
 internal fun cameraPinAccepted(result: JsonElement?): Boolean {
     val value = (if (result is JsonArray) result.singleOrNull() else result) as? JsonPrimitive ?: return false
+    // S7 MaxV acknowledges a valid credential with exactly ["ok"]. Keep other
+    // strings and ambiguous/multi-value replies fail-closed.
+    if (result is JsonArray && value == JsonPrimitive("ok")) return true
     return !value.isString && (value.booleanOrNull == true || value.intOrNull == 1)
 }
 
