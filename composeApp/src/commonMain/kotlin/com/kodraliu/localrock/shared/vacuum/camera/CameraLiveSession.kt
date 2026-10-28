@@ -137,8 +137,11 @@ class CameraLiveSession internal constructor(
         val pc = withTimeout(connectTimeoutMs) {
             stage("Checking PIN")
             val hash = md5Hex(pin)
-            if (!cameraPinAccepted(command("check_homesec_password", obj("password", hash)).result)) {
-                throw CameraFailure("Camera PIN was not accepted. Enter the existing PIN or pattern.")
+            val pinResult = command("check_homesec_password", obj("password", hash)).result
+            if (!cameraPinAccepted(pinResult)) {
+                throw CameraFailure(if (cameraPinRejected(pinResult))
+                    "The robot rejected this camera PIN or pattern. Enter the existing credential again."
+                else "The robot returned an unrecognized PIN-check response. Camera access was not started.")
             }
             stage("Checking camera availability")
             if (owner(command("get_homesec_connect_status").result) != "none") {
@@ -331,6 +334,11 @@ class CameraLiveSession internal constructor(
 internal fun cameraPinAccepted(result: JsonElement?): Boolean {
     val value = (if (result is JsonArray) result.singleOrNull() else result) as? JsonPrimitive ?: return false
     return !value.isString && (value.booleanOrNull == true || value.intOrNull == 1)
+}
+
+internal fun cameraPinRejected(result: JsonElement?): Boolean {
+    val value = (if (result is JsonArray) result.singleOrNull() else result) as? JsonPrimitive ?: return false
+    return !value.isString && (value.booleanOrNull == false || value.intOrNull == 0)
 }
 
 private fun objectResult(result: JsonElement?): JsonObject? = when (result) {

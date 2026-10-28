@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -12,6 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -35,6 +39,12 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     var pin by remember(viewModel) { mutableStateOf("") }
     var typed by remember { mutableStateOf(true) }
     val supported = liveViewSupported && experimentalCameraSupported(viewModel.modelName)
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    fun dismissKeyboard() { focus.clearFocus(); keyboard?.hide() }
+    fun start() {
+        if (pin.isNotBlank()) { dismissKeyboard(); live.start(pin) }
+    }
 
     DisposableEffect(live) { onDispose { live.dispose() } }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
@@ -43,18 +53,30 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     }
 
     Scaffold(
+        modifier = Modifier.imePadding(),
         containerColor = Color.Black,
         contentColor = Color.White,
         topBar = {
             TopAppBar(
                 title = { Text("Video · experimental", color = Color.White) },
                 navigationIcon = {
-                    IconButton(onClick = { live.stop(); onBack() }) {
+                    IconButton(onClick = { dismissKeyboard(); live.stop(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Go back", tint = Color.White)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black),
             )
+        },
+        bottomBar = {
+            if (supported && state == CameraLiveSession.State.Idle) {
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (typed) TextButton(onClick = { dismissKeyboard() }) { Text("Hide keyboard", color = Color.White) }
+                    Button(onClick = { start() }, enabled = pin.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+                        Text("Start live view")
+                    }
+                }
+            }
         },
     ) { insets ->
         Box(Modifier.fillMaxSize().padding(insets), contentAlignment = Alignment.Center) {
@@ -74,9 +96,10 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                         textAlign = TextAlign.Center)
                     if (typed) {
                         OutlinedTextField(
-                            value = pin, onValueChange = { pin = it }, label = { Text("Existing camera PIN") },
+                            value = pin, onValueChange = { pin = it.filter { c -> c in '0'..'9' } }, label = { Text("Existing camera PIN") },
                             singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { start() }),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White, unfocusedTextColor = Color.White,
                                 focusedLabelColor = Color.White, unfocusedLabelColor = Color.LightGray,
@@ -86,8 +109,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                         PatternPinInput(onPattern = { pin = it })
                         Text(if (pin.isBlank()) "Draw your existing pattern" else "Pattern entered")
                     }
-                    Button(onClick = { live.start(pin) }, enabled = pin.isNotBlank()) { Text("Start live view") }
-                    TextButton(onClick = { typed = !typed; pin = "" }) {
+                    TextButton(onClick = { dismissKeyboard(); typed = !typed; pin = "" }) {
                         Text(if (typed) "Use a pattern" else "Use a numeric PIN", color = Color.White)
                     }
                     cleanupWarning?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
@@ -121,7 +143,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                 ) {
                     Text(s.message, textAlign = TextAlign.Center)
                     cleanupWarning?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
-                    Button(onClick = { live.start(pin) }, enabled = pin.isNotBlank()) { Text("Retry") }
+                    Button(onClick = { start() }, enabled = pin.isNotBlank()) { Text("Retry") }
                     TextButton(onClick = { pin = ""; live.stop() }) { Text("Enter PIN again", color = Color.White) }
                 }
             }

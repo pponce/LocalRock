@@ -114,16 +114,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.kodraliu.localrock.shared.vacuum.mapRunKind
 import androidx.compose.ui.graphics.luminance
@@ -132,10 +128,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -784,25 +777,9 @@ internal fun VacuumMapImage(
 ) {
     val bitmap = rememberMapBitmap(
         map, drawRestrictions = layers.restrictions, drawCleaningPath = layers.cleaningPath, drawFurniture = layers.furniture,
-        activeRunRoomIds = activeRunRoomIds,
+        activeRunRoomIds = activeRunRoomIds, selectedRoomIds = selectedRoomIds.toSet(),
     )
     val labelRooms = remember(map.rooms) { map.rooms.filter { it.labelNormX != null && it.labelNormY != null } }
-    val textMeasurer = rememberTextMeasurer()
-    // Labels follow the scheme rather than being a fixed black scrim: over a light map a dark
-    // scrim reads as a scattering of heavy blobs and dominates the surface it sits on.
-    val labelStyle = TextStyle(
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-    val bgColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.76f)
-    val selectedBgColor = MaterialTheme.colorScheme.primary
-    // In dark mode `primary` is a bright cyan, so white-on-primary would be unreadable.
-    val selectedLabelStyle = labelStyle.copy(color = MaterialTheme.colorScheme.onPrimary)
-    val iconPainters = mutableMapOf<Int, Painter>()
-    if (layers.roomIcons) for (room in labelRooms) {
-        mapRoomIcon(room.roomTypeTag)?.let { iconPainters[room.id] = rememberVectorPainter(it) }
-    }
     val currentLayers by rememberUpdatedState(layers)
     val currentOnRoomTap by rememberUpdatedState(onRoomTap)
     val currentOnObstacleTap by rememberUpdatedState(onObstacleTap)
@@ -823,6 +800,10 @@ internal fun VacuumMapImage(
     LaunchedEffect(identity, viewport, fit) {
         mapViewport.frameIfNeeded(identity, viewport, fit)
     }
+
+    val labels = mapRoomLabels(labelRooms, selectedRoomIds, activeRunRoomIds, layers.roomIcons,
+        map.fittedSize(viewport), viewport, mapViewport.offset, mapViewport.scale)
+    val currentLabels by rememberUpdatedState(labels.map { it.placement })
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(
@@ -855,6 +836,10 @@ internal fun VacuumMapImage(
                                 currentMap.obstacleAt(tapOffset, content, mapViewport.offset, mapViewport.scale, 20.dp.toPx())
                                     ?.let { currentOnObstacleTap(it); return@detectTapGestures }
                             }
+                            currentLabels.roomAtLabel(tapOffset)?.let {
+                                currentOnRoomTap(it)
+                                return@detectTapGestures
+                            }
                             val p = (tapOffset - mapViewport.offset) / mapViewport.scale
                             val normX = p.x / content.width
                             val normY = p.y / content.height
@@ -881,45 +866,8 @@ internal fun VacuumMapImage(
                 )
             }
 
-            // Labels are drawn outside the zoom transform so they stay a constant, legible size
-            // instead of growing to 8x with the map. Selected rooms carry their cleaning order,
-            // so selection reads without relying on the highlight colour alone.
-            val occupiedLabels = mutableListOf<Rect>()
-            for (room in labelRooms.sortedByDescending { it.id in activeRunRoomIds || it.id in selectedRoomIds }) {
-                val normX = room.labelNormX ?: continue
-                val normY = room.labelNormY ?: continue
-                val cx = mapViewport.offset.x + normX * content.width * mapViewport.scale
-                val cy = mapViewport.offset.y + normY * content.height * mapViewport.scale
-                if (cx < 0f || cx > size.width || cy < 0f || cy > size.height) continue
-                val order = selectedRoomIds.indexOf(room.id)
-                val selected = order >= 0
-                val text = if (selected) "${order + 1} · ${room.name}" else room.name
-                val style = if (selected) selectedLabelStyle else labelStyle
-                val measured = textMeasurer.measure(
-                    text, style, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    constraints = Constraints(maxWidth = 116.dp.roundToPx()),
-                )
-                val painter = iconPainters[room.id]
-                val iconSize = if (painter != null) 14.dp.toPx() else 0f
-                val iconSpace = if (painter != null) iconSize + 4.dp.toPx() else 0f
-                val tw = measured.size.width.toFloat() + iconSpace
-                val th = maxOf(measured.size.height.toFloat(), iconSize)
-                val padX = 5.dp.toPx()
-                val padY = 3.dp.toPx()
-                val rect = Rect(cx - tw / 2 - padX, cy - th / 2 - padY, cx + tw / 2 + padX, cy + th / 2 + padY)
-                if (occupiedLabels.any { it.overlaps(rect.inflate(2.dp.toPx())) }) continue
-                occupiedLabels += rect
-                drawRoundRect(
-                    color = if (selected) selectedBgColor else bgColor,
-                    topLeft = rect.topLeft, size = rect.size,
-                    cornerRadius = CornerRadius(4.dp.toPx()),
-                )
-                if (painter != null) withTransform({ translate(cx - tw / 2, cy - iconSize / 2) }) {
-                    with(painter) { draw(Size(iconSize, iconSize), colorFilter = ColorFilter.tint(style.color)) }
-                }
-                drawText(measured, topLeft = Offset(cx - tw / 2 + iconSpace, cy - measured.size.height / 2f))
-
-            }
+            // Keep labels legible at every zoom level and use the same bounds for tapping.
+            drawRoomLabels(labels)
 
             // Over the labels, since a tap on a dot opens the obstacle even where a label covers it.
             if (layers.detectedObstacles) drawObstacles(map, content, mapViewport.offset, mapViewport.scale)
