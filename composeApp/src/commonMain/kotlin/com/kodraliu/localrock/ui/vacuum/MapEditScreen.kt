@@ -198,6 +198,11 @@ fun MapEditScreen(
     viewModel: VacuumViewModel,
     onBack: () -> Unit,
 ) {
+    var furnitureOpen by remember { mutableStateOf(false) }
+    if (furnitureOpen) {
+        FurnitureEditScreen(viewModel, onBack = { furnitureOpen = false })
+        return
+    }
     val repository = viewModel.repository
     val parsedMap by repository.parsedMap.collectAsState()
     val status by repository.status.collectAsState()
@@ -294,6 +299,9 @@ fun MapEditScreen(
                     IconButton(onClick = requestBack) { Icon(Icons.Default.Close, "Close editor") }
                 },
                 actions = {
+                    if (!working && !dirty) {
+                        TextButton(onClick = { furnitureOpen = true }) { Text("Furniture") }
+                    }
                     if (working) {
                         CircularProgressIndicator(Modifier.padding(end = 16.dp).size(24.dp), strokeWidth = 2.dp)
                     } else if (mode == EditMode.RESTRICTIONS && dirty) {
@@ -936,7 +944,7 @@ private fun EditorCanvas(
  * what is visible.
  */
 @Stable
-private class MapViewport {
+internal class MapViewport {
     var scale by mutableStateOf(1f)
     var offset by mutableStateOf(Offset.Zero)
     /** Size of the whole map view on screen. */

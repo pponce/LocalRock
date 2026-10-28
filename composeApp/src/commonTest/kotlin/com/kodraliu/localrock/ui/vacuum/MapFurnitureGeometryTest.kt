@@ -2,11 +2,19 @@ package com.kodraliu.localrock.ui.vacuum
 
 import androidx.compose.ui.geometry.Offset
 import com.kodraliu.localrock.shared.vacuum.map.MapFurniture
+import com.kodraliu.localrock.shared.vacuum.map.FURNITURE_CATALOG
 import com.kodraliu.localrock.shared.vacuum.map.ParsedMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 
 class MapFurnitureGeometryTest {
+    @Test fun every_catalog_choice_has_a_distinct_named_symbol() {
+        val symbols = FURNITURE_CATALOG.map { furnitureSymbol(it.type, it.subtype) }
+        symbols.forEach { assertNotEquals(FurnitureSymbol.UNKNOWN, it) }
+        assertEquals(21, symbols.distinct().size)
+    }
+
     @Test fun verified_types_get_recognizable_symbols_and_unknown_pairs_keep_footprints() {
         assertEquals(FurnitureSymbol.SOFA, furnitureSymbol(46, 3))
         assertEquals(FurnitureSymbol.ARMCHAIR, furnitureSymbol(46, 1))
