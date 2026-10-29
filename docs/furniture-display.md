@@ -6,10 +6,21 @@ wardrobe, nightstand, two litter boxes, pet cage, pet bed, pet bowls, floor mirr
 and cat tower. These are LocalRock vector illustrations, not OEM assets. Their
 saved four-corner footprints control position, rotation and dimensions.
 
-Open **Edit map → Furniture**. The editor loads a fresh map. Add an item from the
-catalog, tap or choose it from **Items**, drag to move, and use the rotation,
-size and 5 cm placement controls. Delete removes it from the local draft. **Save**
-writes the changes and checks the returned map; **Cancel** discards local edits.
+Open **Edit map → Furniture**, using the tile below the zone tools. Save or discard
+any pending zone edits first. The furniture editor loads a fresh map. Add an item
+from the catalog, then tap it or choose it from **Items**. Its padded, dashed
+selection box has four controls: top left deletes, top right rotates, bottom left
+moves, and bottom right independently adjusts width and height. Drag the controls
+to place the item; dragging the item itself also moves it. The padding is visual
+only and does not change the saved furniture footprint. Pinch to zoom or drag empty
+map space to pan. VoiceOver and TalkBack expose precise movement, rotation and size
+steps through the corner controls' accessibility actions.
+
+The selected item's **Done** button finishes placement. **Save** writes the changes,
+checks the returned map and returns to Edit map with a confirmation. **Back** asks
+before discarding unsaved edits; **Done** in the toolbar returns to Edit map when
+there are no pending changes. A failed or unconfirmed save keeps the editor open
+and requires a reload before another save.
 Small-screen controls scroll without covering the whole map. Starting dimensions
 are convenient LocalRock sizes based on observed saved footprints; they are not
 verified OEM defaults or minimum/maximum limits.
@@ -32,7 +43,8 @@ rewritten by furniture editing.
 
 The catalog and wire format are grounded in OEM captures and final map readback.
 In-place rotation/movement were observed; resizing uses that same corner-update
-format and still needs LocalRock device validation. LocalRock add, resize,
-rotate, move, delete, Cancel, reconnect and readback behavior must be validated
-on hardware before upstream submission. Camera signaling and general map UI
+format and still needs LocalRock device validation. Adding and saving a bed has
+been confirmed on LocalRock hardware. The corner controls, return navigation,
+resize, rotate, move, delete, discard and reconnect behavior still need device
+validation before upstream submission. Camera signaling and general map UI
 changes remain on their separate feature branches.
