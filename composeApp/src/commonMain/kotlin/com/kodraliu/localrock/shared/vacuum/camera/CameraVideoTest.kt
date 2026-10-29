@@ -18,3 +18,6 @@ enum class CameraVideoTest(
 
     val previewQuality: String get() = "SD"
 }
+
+/** Requested robot encoder quality; signaling choices remain independent. */
+enum class CameraVideoQuality { HD, SD }

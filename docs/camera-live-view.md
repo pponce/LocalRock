@@ -10,8 +10,8 @@ Activate remote viewing in the official Roborock app while connected to Roborock
 servers, before switching to the local server. Keep your existing camera PIN or
 pattern. The robot, phone and server must be able to reach the configured TURN endpoint.
 
-Open **More → Video (experimental)** and enter that PIN or pattern. Choose **A · OEM
-match** to open the viewer. While docked, use **Map → Go** to choose a destination,
+Open **More → Video (experimental)** and enter that PIN or pattern. **Start video**
+uses the OEM matching connection and requests HD by default. While docked, use **Map → Go** to choose a destination,
 or **Play** to start cleaning. Video connects once the robot leaves the dock.
 
 The credential remains in memory only while the screen is in the foreground.
@@ -38,8 +38,9 @@ Manual driving requires a connected viewer and an idle robot. Go works before vi
 connects, including while docked. Leaving video stops a held drive and Go navigation
 started here; a requested return to dock continues.
 
-Video quality is SD. Quality switching, microphone calls and call volume are
-unavailable. **Activate Remote Viewing** and **Deactivate Remote Viewing** are
+Tap **HD/SD** to change the requested quality. Video settings also show the received
+frame dimensions when available. If HD cannot connect, choose **Retry in SD**.
+Microphone calls and call volume are unavailable. **Activate Remote Viewing** and **Deactivate Remote Viewing** are
 visible but disabled and send no commands. Stopping a viewer does not deactivate
 remote viewing. LocalRock does not reset the PIN or take over another viewer.
 
@@ -52,7 +53,7 @@ If another viewer owns the camera, close that viewer and retry. LocalRock releas
 only its own preview session. Wait for cleanup to finish before retrying. If release
 cannot be confirmed, wait for the robot's preview timeout.
 
-The current experimental interface also exposes these signaling choices:
+The **Connection tests (SD)** section keeps these diagnostic choices available:
 
 | Choice | Behavior |
 | --- | --- |
