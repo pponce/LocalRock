@@ -73,6 +73,7 @@ internal fun CameraVideoControls(
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
         val landscape = maxWidth > maxHeight
         val wide = expanded && landscape
+        val portraitVideoHeight = maxHeight * .43f
         val video: @Composable (Modifier) -> Unit = { modifier ->
             Box(modifier.background(Color.Black)) {
                 key(peer) { RtcVideoView(peer, Modifier.fillMaxSize()) }
@@ -95,8 +96,10 @@ internal fun CameraVideoControls(
                 }
             }
         }
+        // Keep the native renderer at one composition site across expand/rotate/collapse.
+        // iOS owns a single RTCMTLVideoView per peer; changing its size needs no reattachment.
+        video(if (expanded) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(portraitVideoHeight))
         if (wide) {
-            video(Modifier.fillMaxSize())
             map?.let { pm -> CameraTargetMap(pm,floor,null,false,{},Modifier.align(Alignment.TopStart).padding(top=48.dp,start=12.dp).size((maxHeight * .28f).coerceAtMost(130.dp))) }
             CameraDrivePad(motion,ready,Modifier.align(Alignment.BottomStart).padding(16.dp).size((maxHeight * .48f).coerceAtMost(220.dp)))
             Column(Modifier.align(Alignment.BottomEnd).padding(end=16.dp,bottom=64.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -106,9 +109,9 @@ internal fun CameraVideoControls(
             TextButton(onClick=onStopVideo,modifier=Modifier.align(Alignment.BottomCenter)) { Text("Stop video",color=Color.White) }
         } else {
             Column(Modifier.fillMaxSize()) {
-                video(Modifier.fillMaxWidth().weight(if(expanded) 1f else .43f))
+                if (expanded) Spacer(Modifier.weight(1f)) else Spacer(Modifier.height(portraitVideoHeight))
                 if (expanded) {
-                    Text("Turn your phone sideways for full-screen controls.",Modifier.padding(16.dp),color=Color.White)
+                    Text("Turn your phone sideways for full-screen controls.",Modifier.fillMaxWidth().background(Color.Black).padding(16.dp),color=Color.White)
                 } else {
                     Row(Modifier.fillMaxWidth().background(Color(0xff242424)).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically) {
                         TextButton(onClick={switchMode()}) { Text(if(steering) "Map" else "Controls",color=Color.White) }
@@ -117,7 +120,7 @@ internal fun CameraVideoControls(
                         IconButton(onClick={motion.dock()},enabled=enabled) { Icon(Icons.Default.Home,"Return to dock",tint=if(enabled) Color.White else Color.Gray) }
                         TextButton(onClick=onStopVideo) { Text("Stop video",color=Color.White) }
                     }
-                    Box(Modifier.fillMaxWidth().weight(.57f).background(Color(0xff181818)),contentAlignment=Alignment.Center) {
+                    Box(Modifier.fillMaxWidth().weight(1f).background(Color(0xff181818)),contentAlignment=Alignment.Center) {
                         if(steering) {
                             BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment=Alignment.Center) {
                                 val padSize = minOf(maxWidth * .85f, (maxHeight - 40.dp).coerceAtLeast(48.dp))
