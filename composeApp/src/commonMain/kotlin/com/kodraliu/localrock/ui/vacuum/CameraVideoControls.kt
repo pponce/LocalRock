@@ -97,8 +97,8 @@ internal fun CameraVideoControls(
         }
         if (wide) {
             video(Modifier.fillMaxSize())
-            map?.let { pm -> CameraTargetMap(pm,floor,null,false,{},Modifier.align(Alignment.TopStart).padding(top=56.dp,start=12.dp).size(130.dp)) }
-            CameraDrivePad(motion,ready,Modifier.align(Alignment.BottomStart).padding(16.dp).size(220.dp))
+            map?.let { pm -> CameraTargetMap(pm,floor,null,false,{},Modifier.align(Alignment.TopStart).padding(top=48.dp,start=12.dp).size((maxHeight * .28f).coerceAtMost(130.dp))) }
+            CameraDrivePad(motion,ready,Modifier.align(Alignment.BottomStart).padding(16.dp).size((maxHeight * .48f).coerceAtMost(220.dp)))
             Column(Modifier.align(Alignment.BottomEnd).padding(end=16.dp,bottom=64.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 FilledTonalIconButton(onClick={motion.stop()},modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Stop,"Stop movement") }
                 FilledTonalIconButton(onClick={motion.dock()},enabled=enabled,modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Home,"Return to dock") }
@@ -119,9 +119,12 @@ internal fun CameraVideoControls(
                     }
                     Box(Modifier.fillMaxWidth().weight(.57f).background(Color(0xff181818)),contentAlignment=Alignment.Center) {
                         if(steering) {
-                            Column(horizontalAlignment=Alignment.CenterHorizontally) {
-                                CameraDrivePad(motion,ready,Modifier.fillMaxWidth(.85f).aspectRatio(1f))
-                                Text("Hold to drive · release to stop",color=Color.LightGray,modifier=Modifier.padding(8.dp))
+                            BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment=Alignment.Center) {
+                                val padSize = minOf(maxWidth * .85f, (maxHeight - 40.dp).coerceAtLeast(48.dp))
+                                Column(horizontalAlignment=Alignment.CenterHorizontally) {
+                                    CameraDrivePad(motion,ready,Modifier.size(padSize))
+                                    Text("Hold to drive · release to stop",color=Color.LightGray,modifier=Modifier.padding(8.dp))
+                                }
                             }
                         } else {
                             val pm=map
