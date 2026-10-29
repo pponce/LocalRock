@@ -17,6 +17,7 @@ import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
+import org.webrtc.RtpCapabilities
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
@@ -24,6 +25,7 @@ import org.webrtc.VideoTrack
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.UUID
 
 actual val liveViewSupported: Boolean = true
 
@@ -76,12 +78,19 @@ internal class AndroidRtcPeer(iceServers: List<RtcIceServer>) : RtcPeer {
     override suspend fun createOffer(options: RtcOfferOptions): String {
         val video = MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO
         val audio = MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO
-        val order = if (options.audioFirst) listOf(audio, video) else listOf(video, audio)
-        order.forEach { kind ->
-            // Match the iOS test offers without attaching microphone/camera capture tracks.
-            val direction = if (kind == audio || options.sendReceiveVideo)
-                RtpTransceiver.RtpTransceiverDirection.SEND_RECV else RtpTransceiver.RtpTransceiverDirection.RECV_ONLY
-            pc.addTransceiver(kind, RtpTransceiver.RtpTransceiverInit(direction))
+        for (kind in listOf(audio, video)) {
+            val streams = if (kind == audio) listOf(UUID.randomUUID().toString()) else emptyList()
+            // Metadata only: never attach a microphone/camera capture source or local track.
+            val transceiver = requireNotNull(pc.addTransceiver(kind, RtpTransceiver.RtpTransceiverInit(
+                RtpTransceiver.RtpTransceiverDirection.SEND_RECV, streams)))
+            val codecs = peerConnectionFactory.getRtpReceiverCapabilities(kind).codecs
+                .mapNotNull { codec -> codecRank(codec, options.compactCodecs)?.let { it to codec } }
+                .sortedBy { it.first }.map { it.second }
+            check(codecs.any { if (kind == audio) it.name.equals("opus", true) else
+                it.name.equals("h264", true) && it.parameters["profile-level-id"]?.lowercase()?.startsWith("42e0") == true }) {
+                "Required video offer codecs unavailable"
+            }
+            transceiver.setCodecPreferences(codecs)
         }
         val offer = suspendCancellableCoroutine<SessionDescription> { cont ->
             pc.createOffer(object : SdpObserverAdapter() {
@@ -184,6 +193,38 @@ internal class AndroidRtcPeer(iceServers: List<RtcIceServer>) : RtcPeer {
         override fun onRemoveStream(stream: MediaStream) {}
         override fun onDataChannel(channel: DataChannel) {}
         override fun onRenegotiationNeeded() {}
+    }
+}
+
+private fun codecRank(codec: RtpCapabilities.CodecCapability, compact: Boolean): Int? {
+    val name = codec.name.lowercase()
+    if (codec.kind == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO) {
+        if (codec.clockRate != 48000) return null
+        return when (name) {
+            "opus" -> if (codec.numChannels == 2) 0 else null
+            "red" -> if (!compact && codec.numChannels == 2) 1 else null
+            "telephone-event" -> if (!compact) 2 else null
+            else -> null
+        }
+    }
+    if (codec.clockRate != 90000) return null
+    return when (name) {
+        "h264" -> {
+            if (codec.parameters["packetization-mode"] != "1") return null
+            val profile = codec.parameters["profile-level-id"]?.lowercase().orEmpty()
+            when {
+                profile.startsWith("640c") && !compact -> 0
+                profile.startsWith("42e0") -> 1
+                else -> null
+            }
+        }
+        "vp8" -> if (!compact) 2 else null
+        "vp9" -> if (!compact && (codec.parameters["profile-id"] ?: "0") == "0") 3 else null
+        "av1" -> if (!compact && (codec.parameters["profile"] ?: "0") == "0") 4 else null
+        "red" -> if (!compact) 5 else null
+        "ulpfec" -> if (!compact) 6 else null
+        "rtx" -> 7
+        else -> null
     }
 }
 

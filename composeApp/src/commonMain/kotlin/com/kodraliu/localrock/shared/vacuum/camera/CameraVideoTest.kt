@@ -2,18 +2,19 @@ package com.kodraliu.localrock.shared.vacuum.camera
 
 import com.kodraliu.localrock.shared.webrtc.RtcOfferOptions
 
-/** Temporary, explicit experiments. Each step changes one setting from the preceding test. */
+/** Temporary OEM comparison. B, C and D each change one detail relative to A. */
 enum class CameraVideoTest(
     val code: String,
     val label: String,
     val description: String,
-    val previewQuality: String,
-    val offerOptions: RtcOfferOptions,
+    val offerOptions: RtcOfferOptions = RtcOfferOptions(),
+    val literalSdpLineBreaks: Boolean = true,
+    val earlyRemoteIce: Boolean = true,
 ) {
-    CURRENT("A", "Current", "Same setup as build 1.40 (1).", "HD", RtcOfferOptions()),
-    AUDIO_FIRST("B", "Audio first", "Changes the media order from A.", "HD", RtcOfferOptions(audioFirst = true)),
-    OEM_LAYOUT("C", "OEM layout", "Adds the OEM video direction to B.", "HD",
-        RtcOfferOptions(audioFirst = true, sendReceiveVideo = true)),
-    OEM_LAYOUT_SD("D", "OEM layout · SD", "Uses C with SD preview quality.", "SD",
-        RtcOfferOptions(audioFirst = true, sendReceiveVideo = true)),
+    OEM_MATCH("A", "OEM match", "Closest match to the captured OEM request."),
+    ESCAPED_JSON("B", "Escaped JSON", "A with standard JSON line breaks.", literalSdpLineBreaks = false),
+    COMPACT_CODECS("C", "Compact offer", "A with Opus and H.264 codecs only.", RtcOfferOptions(compactCodecs = true)),
+    ANSWER_FIRST_ICE("D", "Answer first", "A waits for the answer before requesting ICE.", earlyRemoteIce = false);
+
+    val previewQuality: String get() = "SD"
 }

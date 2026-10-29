@@ -39,7 +39,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     // Existing credentials are kept only for this screen's foreground lifetime.
     var pin by remember(viewModel) { mutableStateOf("") }
     var typed by remember { mutableStateOf(true) }
-    var selectedTest by remember { mutableStateOf(CameraVideoTest.CURRENT) }
+    var selectedTest by remember { mutableStateOf(CameraVideoTest.OEM_MATCH) }
     val supported = liveViewSupported && experimentalCameraSupported(viewModel.modelName)
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current

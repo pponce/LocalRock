@@ -20,6 +20,8 @@ class CameraLiveSessionTest {
         var closed = false
         var receivedVideo = true
         var rejectAnswer = false
+        var answerApplied = false
+        val remoteCandidates = mutableListOf<RtcIceCandidate>()
         var offerOptions: RtcOfferOptions? = null
         override suspend fun createOffer(options: RtcOfferOptions): String {
             offerOptions = options
@@ -28,9 +30,13 @@ class CameraLiveSessionTest {
         }
         override suspend fun setRemoteAnswer(sdp: String) {
             if (rejectAnswer) error("private-native-sdp")
+            answerApplied = true
             connectionState.value = RtcConnectionState.CONNECTED
         }
-        override suspend fun addRemoteCandidate(candidate: RtcIceCandidate) = Unit
+        override suspend fun addRemoteCandidate(candidate: RtcIceCandidate) {
+            check(answerApplied) { "Candidate applied before answer" }
+            remoteCandidates += candidate
+        }
         override suspend fun diagnostics() = selectedPairDiagnostics("host", "srflx", "udp", receivedVideo)
         override fun close() { closed = true; connectionState.value = RtcConnectionState.CLOSED }
     }
@@ -39,6 +45,7 @@ class CameraLiveSessionTest {
         val calls = mutableListOf<String>()
         val stoppedIds = mutableListOf<String>()
         val qualities = mutableListOf<String>()
+        val offers = mutableListOf<String>()
         var pinResult: JsonElement? = JsonPrimitive(true)
         var owner: String? = "none"
         var startDelay: Long = 0
@@ -48,6 +55,7 @@ class CameraLiveSessionTest {
         var failCode = -10005
         var failResult: JsonElement? = null
         var cleanupUnavailable = false
+        var candidates: JsonElement = JsonArray(emptyList())
         override suspend fun call(method: String, params: JsonElement): V1Response {
             calls += method
             if (method == failMethod) return V1Response(null, failResult, buildJsonObject {
@@ -80,7 +88,11 @@ class CameraLiveSessionTest {
                         else -> Base64.encode("{\"type\":\"answer\",\"sdp\":\"test-answer\"}".encodeToByteArray())
                     })
                 }
-                "get_device_ice" -> buildJsonObject { put("dev_ice", JsonArray(emptyList())) }
+                "get_device_ice" -> buildJsonObject { put("dev_ice", candidates) }
+                "send_sdp_to_robot" -> {
+                    offers += Base64.decode(params.jsonObject["app_sdp"]!!.jsonPrimitive.content).decodeToString()
+                    JsonArray(listOf(JsonPrimitive("ok")))
+                }
                 else -> JsonArray(listOf(JsonPrimitive("ok")))
             }
             return V1Response(null, result, null)
@@ -118,33 +130,98 @@ class CameraLiveSessionTest {
         val live = CameraLiveSession(rpc, { FakePeer().also { peers += it } },
             CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])),
             clientId = { "variant-client-${++id}" }, connectTimeoutMs = 5_000, cleanupTimeoutMs = 500)
-        live.start("1234", CameraVideoTest.AUDIO_FIRST); runCurrent()
-        live.start("1234", CameraVideoTest.OEM_LAYOUT_SD)
+        live.start("1234", CameraVideoTest.ESCAPED_JSON); runCurrent()
+        live.start("1234", CameraVideoTest.COMPACT_CODECS)
         live.stop(); runCurrent()
-        live.start("1234", CameraVideoTest.OEM_LAYOUT_SD)
+        live.start("1234", CameraVideoTest.COMPACT_CODECS)
         advanceTimeBy(301); runCurrent()
-        assertEquals(listOf("HD"), rpc.qualities)
+        assertEquals(listOf("SD"), rpc.qualities)
         assertEquals(listOf("variant-client-1"), rpc.stoppedIds)
         assertTrue(peers.isEmpty())
         rpc.startDelay = 0
-        live.start("1234", CameraVideoTest.OEM_LAYOUT_SD); runCurrent()
-        assertEquals(listOf("HD", "SD"), rpc.qualities)
-        assertEquals(CameraVideoTest.OEM_LAYOUT_SD.offerOptions, peers.single().offerOptions)
+        live.start("1234", CameraVideoTest.COMPACT_CODECS); runCurrent()
+        assertEquals(listOf("SD", "SD"), rpc.qualities)
+        assertEquals(CameraVideoTest.COMPACT_CODECS.offerOptions, peers.single().offerOptions)
         live.stop(); runCurrent()
         assertEquals(listOf("variant-client-1", "variant-client-2"), rpc.stoppedIds)
         live.dispose()
     }
 
-    @Test fun experiments_change_one_setting_at_each_step() {
-        val a = CameraVideoTest.CURRENT
-        val b = CameraVideoTest.AUDIO_FIRST
-        val c = CameraVideoTest.OEM_LAYOUT
-        val d = CameraVideoTest.OEM_LAYOUT_SD
+    @Test fun variants_each_change_one_setting_from_the_oem_match() {
+        val a = CameraVideoTest.OEM_MATCH
+        val b = CameraVideoTest.ESCAPED_JSON
+        val c = CameraVideoTest.COMPACT_CODECS
+        val d = CameraVideoTest.ANSWER_FIRST_ICE
         assertEquals(RtcOfferOptions(), a.offerOptions)
-        assertEquals(a.offerOptions.copy(audioFirst = true), b.offerOptions)
-        assertEquals(b.offerOptions.copy(sendReceiveVideo = true), c.offerOptions)
-        assertEquals(c.offerOptions, d.offerOptions)
-        assertEquals(listOf("HD", "HD", "HD", "SD"), listOf(a,b,c,d).map { it.previewQuality })
+        assertEquals(a.offerOptions, b.offerOptions)
+        assertEquals(a.offerOptions.copy(compactCodecs = true), c.offerOptions)
+        assertEquals(a.offerOptions, d.offerOptions)
+        assertEquals(listOf(true, false, true, true), listOf(a,b,c,d).map { it.literalSdpLineBreaks })
+        assertEquals(listOf(true, true, true, false), listOf(a,b,c,d).map { it.earlyRemoteIce })
+        assertEquals(listOf("SD", "SD", "SD", "SD"), listOf(a,b,c,d).map { it.previewQuality })
+    }
+
+    private fun candidate(text: String) = JsonPrimitive(Base64.encode(buildJsonObject {
+        put("candidate", text); put("sdpMid", "1"); put("sdpMLineIndex", 1)
+    }.toString().encodeToByteArray()))
+
+    @Test fun early_ice_is_polled_during_retries_but_applied_only_after_answer_and_once() = runTest(timeout = 10.seconds) {
+        val rpc = FakeRpc().apply {
+            waitForAnswer = true
+            candidates = JsonArray(listOf(candidate("candidate:first"), candidate("candidate:second")))
+        }
+        val peer = FakePeer(); val live = live(rpc, peer)
+        live.start("1234"); runCurrent(); advanceTimeBy(2_001); runCurrent()
+        assertTrue(rpc.calls.count { it == "get_device_ice" } >= 2)
+        assertTrue(peer.remoteCandidates.isEmpty())
+        rpc.waitForAnswer = false
+        advanceTimeBy(1_001); runCurrent()
+        assertIs<CameraLiveSession.State.Streaming>(live.state.value)
+        assertEquals(listOf("candidate:first", "candidate:second"), peer.remoteCandidates.map { it.candidate })
+        assertTrue(peer.remoteCandidates.all { it.sdpMid == "1" && it.sdpMLineIndex == 1 })
+        live.stop(); runCurrent()
+        val count = rpc.calls.size
+        advanceTimeBy(10_000); runCurrent()
+        assertEquals(count, rpc.calls.size)
+        assertEquals(listOf("test-client-1"), rpc.stoppedIds)
+        live.dispose()
+    }
+
+    @Test fun answer_first_variant_defers_ice_polling_until_answer() = runTest(timeout = 10.seconds) {
+        val rpc = FakeRpc().apply { waitForAnswer = true }
+        val live = live(rpc)
+        live.start("1234", CameraVideoTest.ANSWER_FIRST_ICE); runCurrent(); advanceTimeBy(1_001); runCurrent()
+        assertFalse("get_device_ice" in rpc.calls)
+        rpc.waitForAnswer = false
+        advanceTimeBy(1_001); runCurrent()
+        assertTrue("get_device_ice" in rpc.calls)
+        assertIs<CameraLiveSession.State.Streaming>(live.state.value)
+        live.dispose(); runCurrent()
+    }
+
+    @Test fun cancelling_while_candidates_are_buffered_releases_without_applying_them() = runTest(timeout = 10.seconds) {
+        val rpc = FakeRpc().apply {
+            waitForAnswer = true
+            candidates = JsonArray((0..70).map { candidate("candidate:$it") })
+        }
+        val peer = FakePeer(); val live = live(rpc, peer)
+        live.start("1234"); runCurrent()
+        assertTrue("get_device_ice" in rpc.calls)
+        live.stop(); runCurrent()
+        assertTrue(peer.closed)
+        assertTrue(peer.remoteCandidates.isEmpty())
+        assertIs<CameraLiveSession.State.Idle>(live.state.value)
+        assertEquals(listOf("test-client-1"), rpc.stoppedIds)
+        live.dispose()
+    }
+
+    @Test fun default_client_identifier_matches_oem_length_and_is_fresh() = runTest(timeout = 10.seconds) {
+        val rpc = FakeRpc()
+        val live = CameraLiveSession(rpc, { FakePeer() }, backgroundScope, connectTimeoutMs = 5_000)
+        repeat(3) { live.start("1234"); runCurrent(); live.stop(); runCurrent() }
+        assertEquals(3, rpc.stoppedIds.toSet().size)
+        assertTrue(rpc.stoppedIds.all { it.matches(Regex("[0-9a-f]{8}")) })
+        live.dispose(); runCurrent()
     }
 
     @Test fun onlyExplicitSuccessfulPinRepliesPass() {

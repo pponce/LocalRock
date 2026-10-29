@@ -35,23 +35,35 @@ release before choosing another tile; a failure offers **Choose another video te
 The PIN stays in memory while this screen remains in the foreground, so it need not
 be re-entered between tests. There is no automatic fallback or simultaneous viewing.
 
-| Tile | Media order | Audio direction | Video direction | Preview |
-| --- | --- | --- | --- | --- |
-| A · Current | Video, audio | Send/receive | Receive only | HD |
-| B · Audio first | Audio, video | Send/receive | Receive only | HD |
-| C · OEM layout | Audio, video | Send/receive | Send/receive | HD |
-| D · OEM layout · SD | Audio, video | Send/receive | Send/receive | SD |
+| Tile | Difference from A |
+| --- | --- |
+| A · OEM match | Closest supported match to the captured OEM signaling. |
+| B · Escaped JSON | Uses standard escaped JSON line breaks in the offer envelope. |
+| C · Compact offer | Keeps Opus audio and baseline H.264 video with RTX. |
+| D · Answer first | Requests robot ICE only after applying its SDP answer. |
 
-A preserves the iOS offer settings used in 1.40 (1); B changes media order, C changes
-video direction from B, and D changes preview quality from C. Both platforms now
-generate this same test matrix. Direction here advertises a capability: none of
-the variants attaches a local microphone or camera capture track. PIN checks,
-TURN configuration, preview ownership, timeouts and cleanup are the same for all four.
+All four use SD preview, audio before video, send/receive capability declarations,
+a named audio stream, and a fresh eight-character hexadecimal preview client id.
+No variant creates a microphone/camera capture source or local capture track.
 
-These are compatibility experiments, not established fixes. The successful OEM
-capture used the layout and preview quality of D, but its full SDP may still differ.
-Test A–D with diagnostic capture running; report moving frames or the exact failure
-stage for each letter. Remove the temporary choices after a working method is verified.
+A selects the native codecs present in the OEM offer: Opus, audio RED and 48 kHz
+telephone-event; H.264 constrained high/baseline with packetization mode 1, VP8,
+VP9 profile 0, AV1 profile 0, video RED, ULPFEC and associated RTX. The native engine
+assigns payload numbers and supported H.264 levels; certificates, ICE credentials,
+SSRCs and stream identifiers belong to the new session. This is a compatibility
+match, not a replay of another client's session.
+
+The offer envelope places `sdp` before `type`. A, C and D use the literal CRLF
+string encoding observed in the OEM capture; B uses ordinary escaped JSON. Answers
+in either form are accepted without changing their SDP. A, B and C poll robot ICE
+while waiting for the answer and buffer candidates until the native peer has applied
+it. D tests answer-first polling. PIN checks, TURN, ownership, deadlines and cleanup
+apply to every tile.
+
+These are new compatibility experiments. Test A–D with diagnostic capture already
+running, waiting for the capture's next heading before starting each tile. Report
+moving frames or the exact failure stage. Remove the extra choices after hardware
+verification identifies the working method.
 
 ## Connection status
 

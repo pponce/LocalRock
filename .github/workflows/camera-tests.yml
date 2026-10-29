@@ -8,6 +8,29 @@ permissions:
   contents: read
   checks: write
 jobs:
+  native-offer:
+    runs-on: macos-26-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check actual native offers and apply Opus/H264 answers
+        run: |
+          set -o pipefail
+          mkdir -p local-work/rtc-offer-check/Sources/RtcOfferCheck
+          cp tools/rtc-offer-check/Package.swift local-work/rtc-offer-check/
+          cp tools/rtc-offer-check/main.swift iosApp/iosApp/WebRtcOffer.swift local-work/rtc-offer-check/Sources/RtcOfferCheck/
+          swift run --package-path local-work/rtc-offer-check 2>&1 | tee offer-check.log
+      - name: Publish native offer verification
+        if: always() && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const log = fs.existsSync('offer-check.log') ? fs.readFileSync('offer-check.log', 'utf8') : 'Check did not start.';
+            await github.rest.checks.create({owner: context.repo.owner, repo: context.repo.repo,
+              head_sha: context.sha, name: 'Camera native offer verification', status: 'completed',
+              conclusion: '${{ job.status }}' === 'success' ? 'success' : 'failure',
+              output: {title: 'Actual WebRTC offers and answer acceptance', summary: 'Same Swift offer setup as the iPhone app, executed on macOS; device capture remains necessary.',
+                text: '```text\n' + log.slice(-24000) + '\n```'}});
   shared-tests:
     runs-on: ubuntu-latest
     steps:
@@ -85,3 +108,4 @@ jobs:
               conclusion: '${{ job.status }}' === 'success' ? 'success' : 'failure',
               output: {title: 'Shared iOS and Swift app compilation', summary: 'Unsigned generic iPhone build; hardware testing is separate.',
                 text: '```text\n' + log.slice(-48000) + '\n```'}});
+
