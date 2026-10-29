@@ -14,9 +14,9 @@ video entry. Additional models require separate compatibility verification.
   The Xcode target includes `WebRtcPeer.swift` through its synchronized source folder.
 
 Open the vacuum's **More → Video (experimental)** screen. Enter the existing credential,
-choose numeric PIN or pattern, then tap **Start live view**. Opening the map or returning
+choose numeric PIN or pattern, then choose one of the four video test tiles. Opening the map or returning
 from the background never starts a stream. This screen keeps the credential in memory
-only and clears it when the app becomes inactive. The Start button remains above the keyboard;
+only and clears it when the app becomes inactive. The test tiles scroll on smaller screens;
 **Hide keyboard** dismisses the numeric pad. Pattern gestures collect dots crossed between
 pointer events, including the release position. An incomplete new gesture clears the old entry.
 
@@ -26,6 +26,32 @@ PIN reply fails closed, and an RPC error takes precedence over any success value
 A rejected credential and an unrecognized robot response have distinct errors. If the camera belongs to another viewer, close that viewer and
 retry. There is no takeover control, PIN setup/reset or camera activation control here.
 Driving and microphone transmission are outside this feature.
+
+## Temporary video comparison tiles
+
+This test build offers four explicit choices under **More → Video (experimental)**.
+The running screen and retry button retain the chosen letter. Stop and wait for camera
+release before choosing another tile; a failure offers **Choose another video test**.
+The PIN stays in memory while this screen remains in the foreground, so it need not
+be re-entered between tests. There is no automatic fallback or simultaneous viewing.
+
+| Tile | Media order | Audio direction | Video direction | Preview |
+| --- | --- | --- | --- | --- |
+| A · Current | Video, audio | Send/receive | Receive only | HD |
+| B · Audio first | Audio, video | Send/receive | Receive only | HD |
+| C · OEM layout | Audio, video | Send/receive | Send/receive | HD |
+| D · OEM layout · SD | Audio, video | Send/receive | Send/receive | SD |
+
+A preserves the iOS offer settings used in 1.40 (1); B changes media order, C changes
+video direction from B, and D changes preview quality from C. Both platforms now
+generate this same test matrix. Direction here advertises a capability: none of
+the variants attaches a local microphone or camera capture track. PIN checks,
+TURN configuration, preview ownership, timeouts and cleanup are the same for all four.
+
+These are compatibility experiments, not established fixes. The successful OEM
+capture used the layout and preview quality of D, but its full SDP may still differ.
+Test A–D with diagnostic capture running; report moving frames or the exact failure
+stage for each letter. Remove the temporary choices after a working method is verified.
 
 ## Connection status
 
@@ -79,3 +105,4 @@ Keep the existing server, pairing, activation and TURN settings unchanged during
 Share the exact sanitized step/error and connection label if a test fails. Do not share
 PINs, hashes, tokens, TURN secrets, raw MQTT, SDP or ICE. Authorization behavior varies
 by model and firmware; a refusal does not by itself establish a need to re-pair.
+

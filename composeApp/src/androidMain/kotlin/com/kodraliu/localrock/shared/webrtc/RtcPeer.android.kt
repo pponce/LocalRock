@@ -73,15 +73,16 @@ internal class AndroidRtcPeer(iceServers: List<RtcIceServer>) : RtcPeer {
         }
     }
 
-    override suspend fun createOffer(): String {
-        pc.addTransceiver(
-            MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
-            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY),
-        )
-        pc.addTransceiver(
-            MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO,
-            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY),
-        )
+    override suspend fun createOffer(options: RtcOfferOptions): String {
+        val video = MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO
+        val audio = MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO
+        val order = if (options.audioFirst) listOf(audio, video) else listOf(video, audio)
+        order.forEach { kind ->
+            // Match the iOS test offers without attaching microphone/camera capture tracks.
+            val direction = if (kind == audio || options.sendReceiveVideo)
+                RtpTransceiver.RtpTransceiverDirection.SEND_RECV else RtpTransceiver.RtpTransceiverDirection.RECV_ONLY
+            pc.addTransceiver(kind, RtpTransceiver.RtpTransceiverInit(direction))
+        }
         val offer = suspendCancellableCoroutine<SessionDescription> { cont ->
             pc.createOffer(object : SdpObserverAdapter() {
                 override fun onCreateSuccess(desc: SessionDescription) { if (cont.isActive) cont.resume(desc) }
@@ -192,3 +193,4 @@ private abstract class SdpObserverAdapter : SdpObserver {
     override fun onCreateFailure(error: String?) {}
     override fun onSetFailure(error: String?) {}
 }
+
