@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
 @Config(sdk = [35], manifest = Config.NONE)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class FurnitureRenderingTest {
-    private val gray = AndroidColor.rgb(160, 160, 160)
+    private val gray = AndroidColor.rgb(236, 236, 236)
     private val blue = AndroidColor.rgb(123, 170, 223)
     private val corners = listOf(Offset(10f, 10f), Offset(210f, 10f), Offset(210f, 210f), Offset(10f, 210f))
 
