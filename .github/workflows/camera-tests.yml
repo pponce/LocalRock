@@ -39,7 +39,10 @@ jobs:
           umbrella = headers / 'WebRTC.h'
           umbrella.write_text(umbrella.read_text().replace('#import <WebRTC/RTCMTLNSVideoView.h>', ''))
           PY
-            swift run --package-path local-work/rtc-offer-check
+            swift build --package-path local-work/rtc-offer-check
+            # Some SDK builds emit C++ diagnostics despite the Objective-C log setting.
+            # Keep runtime stderr out of CI output; the harness reports safe failures on stdout.
+            swift run --skip-build --package-path local-work/rtc-offer-check 2>/dev/null
           } 2>&1 | tee offer-check.log
       - name: Publish native offer verification
         if: always() && github.event_name == 'push'
