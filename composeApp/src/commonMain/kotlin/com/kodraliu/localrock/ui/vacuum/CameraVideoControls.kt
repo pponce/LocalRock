@@ -176,7 +176,7 @@ internal fun CameraVideoControls(
                 FilledTonalIconButton(onClick=onDock,enabled=enabled,modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Home,"Return to dock and end video") }
             }
             // Calls stay unavailable until their complete protocol and native audio path are validated.
-            TextButton(onClick={settings=true},modifier=Modifier.align(Alignment.BottomCenter).padding(bottom=16.dp)) {
+            TextButton(onClick={motion.release();settings=true},modifier=Modifier.align(Alignment.BottomCenter).padding(bottom=16.dp)) {
                 Icon(Icons.Default.MicOff,"Microphone unavailable",tint=Color.LightGray)
             }
         } else if (expanded) {

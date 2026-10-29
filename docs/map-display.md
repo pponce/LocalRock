@@ -11,3 +11,6 @@ priority. Pinch to zoom for more space; double tap returns to the framed map.
 
 The Layers menu controls room icons, cleaning path, restrictions and detected obstacles.
 Map appearance does not modify the robot's room boundaries, restrictions or saved map.
+
+During an active cleaning task, room emphasis follows the targets reported by the
+robot. Room selection becomes available again when the task finishes.

@@ -40,7 +40,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     val peer by live.peer.collectAsState()
     val connection = peer?.connectionState?.collectAsState()?.value
     val ready = connection == RtcConnectionState.CONNECTED &&
-        (state is CameraLiveSession.State.Connecting || state == CameraLiveSession.State.Streaming)
+        state == CameraLiveSession.State.Streaming
     val readyNow by rememberUpdatedState(ready)
     val motion = remember(viewModel) { CameraMotionController(viewModel.repository.session) { readyNow } }
     var expanded by remember { mutableStateOf(false) }
@@ -85,7 +85,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
         if (state == CameraLiveSession.State.Streaming) preferredQuality = confirmedQuality
     }
     LaunchedEffect(viewing, docked, state) {
-        if (viewing && pendingCameraStart && !docked && pin.isNotBlank() && state == CameraLiveSession.State.Idle) {
+        if (viewing && pendingCameraStart && !docked && pin.isNotBlank() && (state == CameraLiveSession.State.Idle || state is CameraLiveSession.State.Failed)) {
             pendingCameraStart = false
             live.start(pin, selectedTest, preferredQuality)
         }
@@ -121,7 +121,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
         exitDialog = false
         dockDialog = false
         expanded = false
-        motion.stop(includeDock = false)
+        motion.background()
         live.stop()
     }
 
