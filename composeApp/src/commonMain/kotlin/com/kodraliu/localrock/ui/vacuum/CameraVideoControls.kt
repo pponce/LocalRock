@@ -63,6 +63,7 @@ internal fun CameraVideoControls(
     val floor by viewModel.repository.currentFloorFlag.collectAsState()
     val busy by motion.busy.collectAsState()
     val error by motion.error.collectAsState()
+    val controlProgress by motion.progress.collectAsState()
     val callActive by voice.active.collectAsState()
     val callBusy by voice.busy.collectAsState()
     val callError by voice.error.collectAsState()
@@ -265,9 +266,10 @@ internal fun CameraVideoControls(
                 .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                 .padding(bottom=12.dp))
         }
-        (error ?: callError)?.let {Text(it,Modifier.align(Alignment.TopCenter)
+        (error ?: callError ?: controlProgress)?.let {Text(it,Modifier.align(Alignment.TopCenter)
             .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Top)).padding(top=52.dp)
-            .background(Color(0xff5b2424)).padding(8.dp),color=Color.White)}
+            .background(if (error != null || callError != null) Color(0xff5b2424) else Color(0xff242424))
+            .padding(8.dp),color=Color.White)}
     }
     if(settings) AlertDialog(
         onDismissRequest={settings=false},title={Text("Remote viewing")},

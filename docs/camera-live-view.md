@@ -28,6 +28,9 @@ Opening the map or returning to the app does not start video automatically.
   use **Map → Go** to move an idle or docked robot.
 - **Map → Go** sends an idle robot to the selected floor location.
 - **Controls** opens the directional pad. Hold a direction to move; release to stop.
+  If Pin-and-Go was started in this viewer, holding a direction first stops that
+  navigation and waits for the robot to become idle. Keep holding to begin driving;
+  releasing during the handoff cancels the pending drive.
 - **Stop movement** stops manual driving, navigation started here, or a return to dock.
 - **Home** offers to end video and return the robot to its dock.
 - **Expand** fills the screen. Turn the phone horizontally for the inset map and
@@ -46,6 +49,13 @@ Opening the map or returning to the app does not start video automatically.
 Manual driving requires a connected viewer and an idle robot. Go works before video
 connects, including while docked. Leaving video stops a held drive and Go navigation
 started here; a requested return to dock continues.
+
+The viewer shows progress while checking status, stopping Pin-and-Go or entering
+manual control. Startup and status replies can take up to five seconds; movement
+and stop acknowledgements retain a 1.5-second deadline. A failed operation shows
+its stage and command, plus a numeric robot error code when available. Check the
+robot before retrying. Other viewers' navigation and existing cleaning tasks are
+not taken over by a direction press.
 
 Tap **HD/SD** to change the requested quality. Video settings also show the received
 frame dimensions when available, updating while the settings dialog is open.
