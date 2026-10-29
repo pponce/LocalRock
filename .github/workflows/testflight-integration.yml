@@ -47,7 +47,11 @@ jobs:
           name: combined-shared-test-reports
           path: composeApp/build/reports/tests
   ios:
-    runs-on: macos-latest
+    # Kotlin/Native Release optimization exceeds a 4 GiB heap for this combined app.
+    # Standard Intel runners have 14 GiB RAM; the standard arm64 runner has 7 GiB.
+    runs-on: macos-26-intel
+    env:
+      GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx8g -Xss64m -Dfile.encoding=UTF-8" -Dorg.gradle.workers.max=2'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -84,3 +88,4 @@ jobs:
               conclusion: '${{ job.status }}' === 'success' ? 'success' : 'failure',
               output: {title: 'Shared iOS and Swift app compilation', summary: 'Unsigned Release iPhone archive with schedules, map layers, furniture and camera; hardware testing is separate.',
                 text: '```text\n' + log.slice(-48000) + '\n```'}});
+
