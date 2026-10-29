@@ -18,7 +18,20 @@ jobs:
           mkdir -p local-work/rtc-offer-check/Sources/RtcOfferCheck
           cp tools/rtc-offer-check/Package.swift local-work/rtc-offer-check/
           cp tools/rtc-offer-check/main.swift iosApp/iosApp/WebRtcOffer.swift local-work/rtc-offer-check/Sources/RtcOfferCheck/
-          swift run --package-path local-work/rtc-offer-check 2>&1 | tee offer-check.log
+          {
+            swift package --package-path local-work/rtc-offer-check resolve
+            python3 - <<'PY'
+          from pathlib import Path
+          root = Path('local-work/rtc-offer-check/.build/artifacts')
+          for framework in root.rglob('WebRTC.framework'):
+              headers = framework / 'Headers'
+              files = list(framework.rglob('*.h'))
+              print('FRAMEWORK', framework, 'headers', headers.resolve(), 'header_count', len(files))
+              print('AUDIO_SOURCE', [str(p.relative_to(framework)) for p in files if p.name == 'RTCAudioSource.h'])
+              print('TOP_LEVEL', [p.name for p in framework.iterdir()])
+          PY
+            swift run --package-path local-work/rtc-offer-check
+          } 2>&1 | tee offer-check.log
       - name: Publish native offer verification
         if: always() && github.event_name == 'push'
         uses: actions/github-script@v7
