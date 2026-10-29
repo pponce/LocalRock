@@ -22,13 +22,19 @@ jobs:
             swift package --package-path local-work/rtc-offer-check resolve
             python3 - <<'PY'
           from pathlib import Path
-          root = Path('local-work/rtc-offer-check/.build/artifacts')
-          for framework in root.rglob('WebRTC.framework'):
-              headers = framework / 'Headers'
-              files = list(framework.rglob('*.h'))
-              print('FRAMEWORK', framework, 'headers', headers.resolve(), 'header_count', len(files))
-              print('AUDIO_SOURCE', [str(p.relative_to(framework)) for p in files if p.name == 'RTCAudioSource.h'])
-              print('TOP_LEVEL', [p.name for p in framework.iterdir()])
+          import shutil
+          root = Path('local-work/rtc-offer-check/.build/artifacts/webrtc/WebRTC/WebRTC.xcframework')
+          headers = root / 'macos-x86_64_arm64/WebRTC.framework/Headers'
+          source = root / 'ios-arm64/WebRTC.framework/Headers'
+          # M149's macOS slice omits public headers other than its umbrella. Use the
+          # matching API headers from the same checksum-verified XCFramework release.
+          # This affects the CI harness only; the iPhone app uses its complete iOS slice.
+          if not (headers / 'RTCAudioSource.h').is_file():
+              assert (source / 'RTCAudioSource.h').is_file()
+              for item in source.glob('*.h'):
+                  if not (headers / item.name).exists():
+                      shutil.copyfile(item, headers / item.name)
+              print('Restored matching M149 API headers for the macOS offer check.')
           PY
             swift run --package-path local-work/rtc-offer-check
           } 2>&1 | tee offer-check.log
