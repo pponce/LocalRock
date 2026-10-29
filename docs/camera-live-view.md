@@ -123,8 +123,8 @@ by model and firmware; a refusal does not by itself establish a need to re-pair.
 
 The portrait view places live video above the map. Tap a floor location and then Go
 to send the robot there, or select Controls for the directional pad. Hold a direction
-to drive; release to stop. The centre Stop button stops movement started from this
-video screen. Home returns an idle robot to its dock. Let cleaning finish before
+to drive; release to stop. The centre Stop button stops manual driving, Go navigation started here, or
+a return to dock. Home returns an idle robot to its dock. Let cleaning finish before
 using these controls. Commands refused by the robot are shown as errors.
 
 Expand the video and turn the phone horizontally for landscape video with an inset

@@ -93,13 +93,13 @@ class CameraMotionController internal constructor(
         ack("app_charge")
     }
 
-    /** Stop only the manual drive / go-to operation initiated by this controller. */
-    fun stop() {
+    /** Explicit Stop may also halt docking; lifecycle cleanup lets a return to dock continue. */
+    fun stop(includeDock: Boolean = true) {
         if (disposed || haltJob != null) return
         val previous = job
         previous?.cancel()
         val next = scope.launch(start = CoroutineStart.LAZY) {
-            try { previous?.join(); stopNavigation() }
+            try { previous?.join(); stopNavigation(includeDock) }
             finally { haltJob = null; _busy.value = false }
         }
         haltJob = next
@@ -138,15 +138,18 @@ class CameraMotionController internal constructor(
         next.start()
     }
 
-    private suspend fun stopNavigation() {
-        if (!navigationRequested) return
+    private suspend fun stopNavigation(includeDock: Boolean = false) {
+        if (!navigationRequested && !includeDock) return
         try {
             val status = readStatus()
             // A completed Go must never cause a later cleaning task to be stopped.
-            if (status["state"]?.jsonPrimitive?.intOrNull == 16 && status["in_cleaning"]?.jsonPrimitive?.intOrNull == 0) ack("app_stop")
+            val state = status["state"]?.jsonPrimitive?.intOrNull
+            val stopGo = navigationRequested && state == 16
+            val stopDock = includeDock && state in setOf(6, 15)
+            if ((stopGo || stopDock) && status["in_cleaning"]?.jsonPrimitive?.intOrNull == 0) ack("app_stop")
             navigationRequested = false
         }
-        catch (_: Exception) { _error.value = "Go-to stop could not be confirmed. Check the robot." }
+        catch (_: Exception) { _error.value = "Movement stop could not be confirmed. Check the robot." }
     }
 
     private fun requireReady() { check(ready()) { "Video is not connected" } }

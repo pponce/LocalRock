@@ -44,7 +44,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val viewing = peer != null && (state is CameraLiveSession.State.Connecting || state == CameraLiveSession.State.Streaming)
     BackHandler(enabled = expanded) { motion.release(); expanded = false }
-    LaunchedEffect(ready) { if (!ready) motion.stop() }
+    LaunchedEffect(ready) { if (!ready) motion.stop(includeDock = false) }
     LaunchedEffect(viewing) { if (!viewing) expanded = false }
     val diagnostics by live.diagnostics.collectAsState()
     val cleanupWarning by live.cleanupWarning.collectAsState()
@@ -67,7 +67,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     DisposableEffect(live, motion) { onDispose { motion.dispose(); live.dispose() } }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
         pin = ""
-        motion.stop()
+        motion.stop(includeDock = false)
         live.stop()
     }
 
@@ -80,7 +80,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                 title = { Text(if (state == CameraLiveSession.State.Idle) "Video tests"
                     else "Video ${selectedTest.code} · ${selectedTest.label}", color = Color.White) },
                 navigationIcon = {
-                    IconButton(onClick = { dismissKeyboard(); motion.stop(); live.stop(); onBack() }) {
+                    IconButton(onClick = { dismissKeyboard(); motion.stop(includeDock = false); live.stop(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Go back", tint = Color.White)
                     }
                 },
@@ -101,7 +101,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
             // Attach the renderer while connecting so a first video frame can be decoded.
             if (viewing) peer?.let { currentPeer ->
                 CameraVideoControls(viewModel, currentPeer, motion, state, ready, expanded,
-                    onExpand = { expanded = it }, onStopVideo = { motion.stop(); live.stop() })
+                    onExpand = { expanded = it }, onStopVideo = { motion.stop(includeDock = false); live.stop() })
             }
             if (!supported) {
                 Text("Experimental video is currently available for S7 MaxV only, in builds with WebRTC enabled.",

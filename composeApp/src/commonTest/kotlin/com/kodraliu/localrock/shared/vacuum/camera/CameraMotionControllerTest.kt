@@ -118,6 +118,16 @@ class CameraMotionControllerTest {
         c.stop();advanceUntilIdle();assertFalse("app_stop" in rpc.methods())
         c.dispose();advanceUntilIdle()
     }
+    @Test fun explicit_stop_can_stop_returning_to_dock() = runTest {
+        val rpc=Rpc().apply {state=6};val c=controller(rpc)
+        c.stop();advanceUntilIdle();assertEquals("app_stop",rpc.methods().last())
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun background_cleanup_does_not_interrupt_returning_to_dock() = runTest {
+        val rpc=Rpc().apply {state=6};val c=controller(rpc)
+        c.stop(includeDock=false);advanceUntilIdle();assertTrue(rpc.calls.isEmpty())
+        c.dispose();advanceUntilIdle();assertTrue(rpc.calls.isEmpty())
+    }
     @Test fun dispose_releases_held_drive() = runTest {
         val rpc=Rpc();val c=controller(rpc)
         c.hold(CameraMotionController.Direction.LEFT);runCurrent();c.dispose();advanceUntilIdle()
