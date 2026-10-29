@@ -58,140 +58,157 @@ internal fun drawMapFurniture(canvas: Canvas, map: ParsedMap, dark: Boolean) {
     }
 }
 
-/** Shared LocalRock vector artwork for the map, editor and catalog; no OEM assets. */
+/** Shared monochrome plan-view artwork. Clear details are isolated from the map below. */
+@Suppress("UNUSED_PARAMETER") // Retain the shared caller API; artwork is identical in both themes.
 internal fun drawFurnitureSymbol(
     canvas: Canvas, corners: List<Offset>, type: Int, subtype: Int, dark: Boolean, strokeWidth: Float = .5f,
 ) {
-    val stroke = if (dark) Color(0xFFE0E7E8) else Color(0xFF485C64)
-    val fabric = if (dark) Color(0xFF6B8794) else Color(0xFFAAC7D1)
-    val cushion = if (dark) Color(0xFF9CB2BB) else Color(0xFFDCE9ED)
-    val wood = if (dark) Color(0xFFA68A66) else Color(0xFFD6B382)
-    val glass = if (dark) Color(0xFF81B5BD) else Color(0xFFCCE8E9)
-    val fill = Paint().apply { isAntiAlias = true }
-    val outline = Paint().apply {
-        color = stroke; style = PaintingStyle.Stroke; this.strokeWidth = strokeWidth; isAntiAlias = true
+    if (corners.size != 4 || corners.any { !it.x.isFinite() || !it.y.isFinite() }) return
+    val shortest = corners.indices.minOf { (corners[(it + 1) % 4] - corners[it]).getDistance() }
+    if (shortest <= 0f) return
+    // Twice the former detail weight, capped proportionally so small map items retain their fill.
+    val detailWidth = (strokeWidth * 2f).coerceAtMost(shortest * .02f)
+    val fill = Paint().apply { color = Color(0xFFA0A0A0); isAntiAlias = true }
+    val cut = Paint().apply {
+        blendMode = androidx.compose.ui.graphics.BlendMode.Clear
+        style = PaintingStyle.Stroke; this.strokeWidth = detailWidth; isAntiAlias = true
+        strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+        strokeJoin = androidx.compose.ui.graphics.StrokeJoin.Round
     }
-    fun shape(points: List<Pair<Float, Float>>, color: Color) {
-        val path = Path()
-        points.map { (x, y) -> furniturePoint(corners, x, y) }.forEachIndexed { index, p ->
-            if (index == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
+    val hole = Paint().apply { blendMode = androidx.compose.ui.graphics.BlendMode.Clear; isAntiAlias = true }
+    fun path(points: List<Pair<Float, Float>>, closed: Boolean = true): Path = Path().apply {
+        points.forEachIndexed { i, (x, y) ->
+            val p = furniturePoint(corners, x, y)
+            if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y)
         }
-        path.close(); fill.color = color
-        canvas.drawPath(path, fill); canvas.drawPath(path, outline)
+        if (closed) close()
     }
-    fun box(left: Float, top: Float, right: Float, bottom: Float, color: Color) =
-        shape(listOf(left to top, right to top, right to bottom, left to bottom), color)
-    fun oval(left: Float, top: Float, right: Float, bottom: Float, color: Color) =
-        shape((0 until 32).map { i ->
-            val angle = i * 2 * kotlin.math.PI / 32
-            ((left + right) / 2 + cos(angle).toFloat() * (right - left) / 2) to
-                ((top + bottom) / 2 + sin(angle).toFloat() * (bottom - top) / 2)
-        }, color)
-    val symbol = furnitureSymbol(type, subtype)
-    when (symbol) {
-        FurnitureSymbol.SOFA, FurnitureSymbol.DOUBLE_SOFA, FurnitureSymbol.ARMCHAIR,
-        FurnitureSymbol.CHAISE_LEFT, FurnitureSymbol.CHAISE_RIGHT -> {
-            val chaise = symbol == FurnitureSymbol.CHAISE_LEFT || symbol == FurnitureSymbol.CHAISE_RIGHT
-            val bottom = if (chaise) .66f else .94f
-            box(.04f, .08f, .96f, bottom, fabric)
-            box(.1f, .08f, .9f, .27f, cushion)
-            val seats = when (symbol) { FurnitureSymbol.ARMCHAIR -> 1; FurnitureSymbol.DOUBLE_SOFA -> 2; else -> 3 }
-            for (i in 0 until seats) {
-                val left = .2f + i * .6f / seats
-                box(left, .32f, left + .6f / seats, bottom - .06f, cushion)
-            }
-            box(.04f, .24f, .18f, bottom, fabric)
-            box(.82f, .24f, .96f, bottom, fabric)
-            if (chaise) {
-                val left = if (symbol == FurnitureSymbol.CHAISE_LEFT) .04f else .66f
-                box(left, .4f, left + .3f, .96f, fabric)
-                box(left + .04f, .44f, left + .26f, .91f, cushion)
+    fun shape(points: List<Pair<Float, Float>>, outline: Boolean = true, erase: Boolean = false) {
+        val p = path(points)
+        canvas.drawPath(p, if (erase) hole else fill)
+        if (outline && !erase) canvas.drawPath(p, cut)
+    }
+    fun line(vararg points: Pair<Float, Float>) = canvas.drawPath(path(points.toList(), false), cut)
+    fun rounded(l: Float, t: Float, r: Float, b: Float, radius: Float = .035f): List<Pair<Float, Float>> {
+        val rx = radius.coerceAtMost((r - l) / 2)
+        val ry = radius.coerceAtMost((b - t) / 2)
+        return listOf(Triple(r-rx, t+ry, -90), Triple(r-rx, b-ry, 0),
+            Triple(l+rx, b-ry, 90), Triple(l+rx, t+ry, 180)).flatMap { (cx, cy, start) ->
+            (0..8).map { i ->
+                val a = (start + i * 90.0 / 8) * kotlin.math.PI / 180
+                cx + cos(a).toFloat() * rx to cy + sin(a).toFloat() * ry
             }
         }
-        FurnitureSymbol.BED, FurnitureSymbol.WIDE_BED -> {
-            box(.08f, .02f, .92f, .98f, wood)
-            box(.14f, .1f, .86f, .94f, cushion)
-            if (symbol == FurnitureSymbol.WIDE_BED) {
-                box(.2f, .14f, .47f, .34f, Color(0xFFF4F1E9))
-                box(.53f, .14f, .8f, .34f, Color(0xFFF4F1E9))
-            } else box(.25f, .14f, .75f, .34f, Color(0xFFF4F1E9))
-            box(.14f, .4f, .86f, .94f, fabric)
-            box(.14f, .4f, .86f, .49f, cushion)
-        }
-        FurnitureSymbol.DINING_SET -> {
-            for (top in listOf(.2f, .62f)) {
-                box(.02f, top, .23f, top + .18f, cushion)
-                box(.77f, top, .98f, top + .18f, cushion)
+    }
+    fun box(l: Float, t: Float, r: Float, b: Float, radius: Float = .035f, erase: Boolean = false) =
+        shape(rounded(l,t,r,b,radius), erase = erase)
+    fun oval(l: Float, t: Float, r: Float, b: Float) = shape((0 until 64).map { i ->
+        val a = i * 2 * kotlin.math.PI / 64
+        (l+r)/2 + cos(a).toFloat()*(r-l)/2 to (t+b)/2 + sin(a).toFloat()*(b-t)/2
+    })
+    // Clear applies only to this symbol, never to the map or another furniture item.
+    val bounds = androidx.compose.ui.geometry.Rect(corners.minOf { it.x } - detailWidth,
+        corners.minOf { it.y } - detailWidth, corners.maxOf { it.x } + detailWidth,
+        corners.maxOf { it.y } + detailWidth)
+    canvas.saveLayer(bounds, Paint())
+    try {
+        when (val symbol = furnitureSymbol(type, subtype)) {
+            FurnitureSymbol.BED, FurnitureSymbol.WIDE_BED -> {
+                box(.04f,.02f,.96f,.98f,.055f)
+                box(.04f,.02f,.96f,.14f,.055f)
+                box(.08f,.14f,.92f,.96f,.04f)
+                if (symbol == FurnitureSymbol.WIDE_BED) {
+                    box(.12f,.17f,.48f,.37f); box(.52f,.17f,.88f,.37f)
+                } else box(.15f,.17f,.85f,.37f)
+                box(.08f,.4f,.92f,.55f)
+                line(.08f to .55f, .92f to .55f)
             }
-            box(.36f, .02f, .64f, .18f, cushion)
-            box(.36f, .82f, .64f, .98f, cushion)
-            box(.24f, .2f, .76f, .8f, wood)
-        }
-        FurnitureSymbol.TV_STAND -> {
-            box(.02f, .05f, .98f, .95f, wood)
-            box(.07f, .5f, .48f, .9f, cushion); box(.52f, .5f, .93f, .9f, cushion)
-            box(.18f, .12f, .82f, .32f, stroke); box(.44f, .32f, .56f, .52f, stroke)
-        }
-        FurnitureSymbol.SQUARE_TABLE -> {
-            box(.06f, .06f, .94f, .94f, wood); box(.14f, .14f, .86f, .86f, cushion)
-        }
-        FurnitureSymbol.COFFEE_TABLE -> {
-            oval(.02f, .06f, .98f, .94f, wood); oval(.12f, .18f, .88f, .82f, glass)
-        }
-        FurnitureSymbol.SHOE_RACK -> {
-            box(.03f, .05f, .97f, .95f, wood)
-            for (y in listOf(.12f, .4f, .68f)) {
-                box(.1f, y, .9f, y + .2f, cushion)
-                oval(.16f, y + .03f, .39f, y + .17f, fabric)
-                oval(.55f, y + .03f, .78f, y + .17f, fabric)
+            FurnitureSymbol.SOFA, FurnitureSymbol.DOUBLE_SOFA, FurnitureSymbol.ARMCHAIR,
+            FurnitureSymbol.CHAISE_LEFT, FurnitureSymbol.CHAISE_RIGHT -> {
+                val chaise = symbol == FurnitureSymbol.CHAISE_LEFT || symbol == FurnitureSymbol.CHAISE_RIGHT
+                val bottom = if (chaise) .62f else .95f
+                val seats = when (symbol) { FurnitureSymbol.ARMCHAIR -> 1; FurnitureSymbol.DOUBLE_SOFA -> 2; else -> 3 }
+                for (i in 0 until seats) {
+                    val l = .12f + i * .76f / seats
+                    val r = .12f + (i+1) * .76f / seats
+                    val extended = (symbol == FurnitureSymbol.CHAISE_LEFT && i == 0) ||
+                        (symbol == FurnitureSymbol.CHAISE_RIGHT && i == seats-1)
+                    box(l,.08f,r,if (extended) .96f else bottom)
+                    box(l,.08f,r,.28f)
+                }
+                box(.02f,.12f,.12f,bottom); box(.88f,.12f,.98f,bottom)
             }
-        }
-        FurnitureSymbol.WARDROBE -> {
-            box(.02f, .04f, .98f, .96f, wood)
-            box(.07f, .1f, .49f, .9f, cushion); box(.51f, .1f, .93f, .9f, cushion)
-            box(.41f, .38f, .44f, .62f, stroke); box(.56f, .38f, .59f, .62f, stroke)
-        }
-        FurnitureSymbol.NIGHTSTAND -> {
-            box(.05f, .05f, .95f, .95f, wood)
-            for (y in listOf(.14f, .52f)) {
-                box(.12f, y, .88f, y + .32f, cushion)
-                oval(.44f, y + .1f, .56f, y + .21f, stroke)
+            FurnitureSymbol.TV_STAND -> {
+                box(.02f,.1f,.98f,.9f)
+                box(.13f,.22f,.87f,.43f,.015f,erase=true)
+                box(.4f,.47f,.6f,.66f,.005f,erase=true)
             }
-        }
-        FurnitureSymbol.LITTER_BOX -> {
-            oval(.05f, .03f, .95f, .97f, fabric); oval(.16f, .14f, .84f, .86f, wood)
-            for (x in listOf(.34f, .56f)) oval(x, .4f, x + .1f, .51f, cushion)
-        }
-        FurnitureSymbol.COVERED_LITTER_BOX -> {
-            oval(.04f, .03f, .96f, .97f, fabric)
-            oval(.17f, .14f, .83f, .87f, cushion); oval(.3f, .53f, .7f, .94f, stroke)
-        }
-        FurnitureSymbol.PET_CAGE -> {
-            box(.03f, .03f, .97f, .97f, cushion)
-            for (p in listOf(.22f, .42f, .62f, .82f)) {
-                box(p, .05f, p + .025f, .95f, fabric)
-                box(.05f, p, .95f, p + .025f, fabric)
+            FurnitureSymbol.DINING_SET -> {
+                for (x in listOf(.2f,.58f)) {
+                    box(x,.04f,x+.22f,.32f,.055f); box(x,.68f,x+.22f,.96f,.055f)
+                    line(x to .12f, x+.22f to .12f)
+                    line(x to .88f, x+.22f to .88f)
+                }
+                box(.08f,.25f,.92f,.75f,.02f)
             }
-            box(.3f, .75f, .7f, .97f, wood)
+            FurnitureSymbol.SQUARE_TABLE, FurnitureSymbol.COFFEE_TABLE,
+            FurnitureSymbol.WARDROBE, FurnitureSymbol.NIGHTSTAND -> {
+                box(.02f,.02f,.98f,.98f,.025f); box(.07f,.08f,.93f,.92f,.005f)
+            }
+            FurnitureSymbol.SHOE_RACK -> {
+                box(.02f,.05f,.98f,.95f,.01f)
+                for (i in 1..5) { val y=.05f+i*.15f; line(.04f to y,.96f to y) }
+                box(.02f,.02f,.07f,.98f,.01f); box(.93f,.02f,.98f,.98f,.01f)
+                for (x in listOf(.17f,.3f,.63f,.76f)) oval(x,.19f,x+.12f,.83f)
+            }
+            FurnitureSymbol.LITTER_BOX -> {
+                box(.03f,.04f,.97f,.96f,.09f); box(.08f,.12f,.92f,.88f,.07f)
+            }
+            FurnitureSymbol.COVERED_LITTER_BOX -> {
+                box(.02f,.4f,.07f,.6f,.02f); box(.93f,.4f,.98f,.6f,.02f)
+                box(.06f,.04f,.94f,.96f,.17f); box(.1f,.1f,.9f,.9f,.14f)
+                line(.5f to .1f,.5f to .9f); box(.45f,.41f,.55f,.59f,.02f)
+            }
+            FurnitureSymbol.PET_CAGE -> {
+                box(.03f,.03f,.97f,.97f,.03f); box(.09f,.09f,.91f,.91f,.005f)
+                for (i in 1..4) { val x=.09f+i*.164f; line(x to .09f,x to .91f) }
+                for (i in 1..2) { val y=.09f+i*.273f; line(.09f to y,.91f to y) }
+                for (x in listOf(.02f,.88f)) for (y in listOf(.02f,.88f)) box(x,y,x+.1f,y+.1f,.02f)
+            }
+            FurnitureSymbol.PET_BED -> {
+                box(.02f,.04f,.98f,.96f,.09f); box(.15f,.19f,.85f,.81f,.025f)
+                line(.05f to .08f,.15f to .19f); line(.95f to .08f,.85f to .19f)
+                line(.05f to .92f,.15f to .81f); line(.95f to .92f,.85f to .81f)
+                box(.02f,.78f,.3f,.96f,.055f); box(.7f,.78f,.98f,.96f,.055f)
+                box(.3f,.81f,.7f,1f,0f,erase=true)
+            }
+            FurnitureSymbol.PET_BOWLS -> {
+                // 19C: one curved, waisted holder with two recessed bowls.
+                val holder = (0 until 96).map { i ->
+                    val a=i*2*kotlin.math.PI/96
+                    val x=.5f+.48f*cos(a).toFloat()
+                    val waist=.65f+.35f*kotlin.math.abs(cos(a)).toFloat()
+                    x to .5f+.46f*sin(a).toFloat()*waist
+                }
+                shape(holder)
+                oval(.07f,.15f,.45f,.85f); oval(.55f,.15f,.93f,.85f)
+                oval(.1f,.2f,.42f,.8f); oval(.58f,.2f,.9f,.8f)
+            }
+            FurnitureSymbol.MIRROR -> {
+                // 20C: original inverted-V support; shallow overhead projection at 8 degrees.
+                shape(listOf(.19f to .92f,.46f to .04f,.5f to .02f,.52f to .08f,.26f to .96f))
+                shape(listOf(.48f to .08f,.5f to .02f,.54f to .04f,.81f to .92f,.74f to .96f))
+                shape(listOf(.02f to .68f,.98f to .68f,.94f to .91f,.06f to .91f))
+                line(.07f to .91f,.04f to .72f,.96f to .72f,.93f to .91f)
+            }
+            FurnitureSymbol.CAT_TOWER -> {
+                shape(listOf(.08f to .08f,.91f to .08f,.96f to .14f,.55f to .94f,
+                    .48f to .98f,.42f to .94f,.03f to .17f))
+                oval(.39f,.42f,.87f,.91f); oval(.03f,.02f,.58f,.59f); oval(.79f,.13f,.91f,.26f)
+            }
+            FurnitureSymbol.UNKNOWN -> box(.02f,.02f,.98f,.98f)
         }
-        FurnitureSymbol.PET_BED -> {
-            oval(.02f, .04f, .98f, .96f, fabric); oval(.15f, .18f, .85f, .82f, cushion)
-            oval(.39f, .4f, .61f, .64f, fabric)
-        }
-        FurnitureSymbol.PET_BOWLS -> {
-            oval(.02f, .08f, .48f, .92f, wood); oval(.52f, .08f, .98f, .92f, wood)
-            oval(.1f, .23f, .4f, .77f, glass); oval(.6f, .23f, .9f, .77f, fabric)
-        }
-        FurnitureSymbol.MIRROR -> {
-            box(.06f, .06f, .94f, .94f, wood); box(.14f, .14f, .86f, .86f, glass)
-            shape(listOf(.18f to .18f, .6f to .18f, .18f to .72f), Color.White.copy(alpha = .6f))
-        }
-        FurnitureSymbol.CAT_TOWER -> {
-            box(.04f, .04f, .96f, .96f, wood)
-            oval(.1f, .1f, .58f, .58f, cushion); oval(.5f, .46f, .93f, .9f, fabric)
-            oval(.25f, .26f, .41f, .42f, wood); oval(.65f, .6f, .79f, .74f, wood)
-            box(.16f, .64f, .42f, .91f, fabric)
-        }
-        FurnitureSymbol.UNKNOWN -> box(0f, 0f, 1f, 1f, stroke.copy(alpha = .2f))
+    } finally {
+        canvas.restore()
     }
 }
