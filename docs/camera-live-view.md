@@ -25,7 +25,7 @@ single-value `["ok"]` PIN acknowledgement is supported. An invalid or unknown
 PIN reply fails closed, and an RPC error takes precedence over any success value.
 A rejected credential and an unrecognized robot response have distinct errors. If the camera belongs to another viewer, close that viewer and
 retry. There is no takeover control, PIN setup/reset or camera activation control here.
-Driving and microphone transmission are outside this feature.
+Microphone transmission is not yet available. See the video controls below.
 
 ## Temporary video comparison tiles
 
@@ -118,3 +118,22 @@ Share the exact sanitized step/error and connection label if a test fails. Do no
 PINs, hashes, tokens, TURN secrets, raw MQTT, SDP or ICE. Authorization behavior varies
 by model and firmware; a refusal does not by itself establish a need to re-pair.
 
+
+## Video controls
+
+The portrait view places live video above the map. Tap a floor location and then Go
+to send the robot there, or select Controls for the directional pad. Hold a direction
+to drive; release to stop. The centre Stop button stops movement started from this
+video screen. Home returns an idle robot to its dock. Let cleaning finish before
+using these controls. Commands refused by the robot are shown as errors.
+
+Expand the video and turn the phone horizontally for landscape video with an inset
+map and overlaid driving, Stop and Home buttons. Collapse returns to the portrait
+layout. Driving stops when the screen pauses, the connection drops, or a held
+gesture is cancelled. Go-to navigation started here is stopped when leaving video;
+a requested return to dock is allowed to continue.
+
+The video remains SD. Call volume, microphone calls, live quality switching and
+remote-viewing activation are not available in this controls preview. Change those
+settings in the OEM app. Stopping a viewing session does not deactivate the robot's
+remote-viewing feature.
