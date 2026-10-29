@@ -58,20 +58,20 @@ class CameraLiveSession internal constructor(
     private var attemptJob: Job? = null
     private var disposed = false
 
-    private class Attempt(val id: String) {
+    private class Attempt(val id: String, val test: CameraVideoTest) {
         var previewRequested = false
         var startAcknowledged = false
         var peer: RtcPeer? = null
         var stage = "Preparing"
     }
 
-    fun start(pin: String) {
+    fun start(pin: String, test: CameraVideoTest = CameraVideoTest.CURRENT) {
         if (disposed || attemptJob != null) return
         if (pin.isBlank()) {
             _state.value = State.Failed("Enter your existing camera PIN or pattern.")
             return
         }
-        val attempt = Attempt(clientId())
+        val attempt = Attempt(clientId(), test)
         _diagnostics.value = RtcDiagnostics()
         _cleanupWarning.value = null
         _state.value = State.Connecting("Preparing…")
@@ -155,7 +155,7 @@ class CameraLiveSession internal constructor(
                     attempt.previewRequested = true
                     val response = try {
                         command("start_camera_preview", buildJsonObject {
-                            put("client_id", attempt.id); put("quality", "HD"); put("password", hash)
+                            put("client_id", attempt.id); put("quality", attempt.test.previewQuality); put("password", hash)
                         })
                     } catch (e: CameraFailure) {
                         // An explicit robot refusal differs from a lost/late acknowledgement.
@@ -197,7 +197,7 @@ class CameraLiveSession internal constructor(
                 }
             }
             stage("Sending video offer")
-            val offer = peer.createOffer()
+            val offer = peer.createOffer(attempt.test.offerOptions)
             command("send_sdp_to_robot", obj("app_sdp", encode(buildJsonObject {
                 put("type", "offer"); put("sdp", offer)
             })))
@@ -353,3 +353,4 @@ private fun objectResult(result: JsonElement?): JsonObject? = when (result) {
 private fun obj(key: String, value: String): JsonObject = buildJsonObject { put(key, value) }
 private fun md5Hex(input: String): String = MD5().digest(input.encodeToByteArray())
     .joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
+

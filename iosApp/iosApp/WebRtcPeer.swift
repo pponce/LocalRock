@@ -67,15 +67,21 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
 
     // MARK: RtcNativePeer
 
-    func createOffer(onSuccess: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
+    func createOffer(audioFirst: Bool, sendReceiveVideo: Bool,
+                     onSuccess: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
         let recvVideo = RTCRtpTransceiverInit()
-        recvVideo.direction = .recvOnly
-        peerConnection.addTransceiver(of: .video, init: recvVideo)
+        recvVideo.direction = sendReceiveVideo ? .sendRecv : .recvOnly
 
         let recvAudio = RTCRtpTransceiverInit()
         // Offer bidirectional audio capability without attaching a capture track.
         recvAudio.direction = .sendRecv
-        peerConnection.addTransceiver(of: .audio, init: recvAudio)
+        if audioFirst {
+            peerConnection.addTransceiver(of: .audio, init: recvAudio)
+            peerConnection.addTransceiver(of: .video, init: recvVideo)
+        } else {
+            peerConnection.addTransceiver(of: .video, init: recvVideo)
+            peerConnection.addTransceiver(of: .audio, init: recvAudio)
+        }
 
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         peerConnection.offer(for: constraints) { [weak self] sdp, error in
@@ -200,3 +206,4 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
         if Thread.isMainThread { block() } else { DispatchQueue.main.async { block() } }
     }
 }
+

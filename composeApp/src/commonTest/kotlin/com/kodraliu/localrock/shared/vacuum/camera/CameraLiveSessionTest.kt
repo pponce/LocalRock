@@ -20,7 +20,9 @@ class CameraLiveSessionTest {
         var closed = false
         var receivedVideo = true
         var rejectAnswer = false
-        override suspend fun createOffer(): String {
+        var offerOptions: RtcOfferOptions? = null
+        override suspend fun createOffer(options: RtcOfferOptions): String {
+            offerOptions = options
             localCandidates.emit(RtcIceCandidate("0", 0, "candidate:test"))
             return "test-offer"
         }
@@ -36,6 +38,7 @@ class CameraLiveSessionTest {
     private class FakeRpc : CameraRpc {
         val calls = mutableListOf<String>()
         val stoppedIds = mutableListOf<String>()
+        val qualities = mutableListOf<String>()
         var pinResult: JsonElement? = JsonPrimitive(true)
         var owner: String? = "none"
         var startDelay: Long = 0
@@ -57,6 +60,7 @@ class CameraLiveSessionTest {
                     owner?.let { buildJsonObject { put("client_id", it) } } ?: JsonObject(emptyMap())
                 }
                 "start_camera_preview" -> {
+                    qualities += params.jsonObject["quality"]!!.jsonPrimitive.content
                     delay(startDelay)
                     owner = params.jsonObject["client_id"]!!.jsonPrimitive.content
                     JsonArray(listOf(JsonPrimitive("ok")))
@@ -88,6 +92,59 @@ class CameraLiveSessionTest {
         return CameraLiveSession(rpc, { peer },
             CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])),
             clientId = { "test-client-${++id}" }, connectTimeoutMs = 5_000, cleanupTimeoutMs = 500)
+    }
+
+    @Test fun all_four_tests_send_the_selected_offer_and_preview_quality_and_release_their_camera() = runTest(timeout = 10.seconds) {
+        for (test in CameraVideoTest.entries) {
+            val rpc = FakeRpc()
+            val peer = FakePeer()
+            val live = live(rpc, peer)
+            live.start("1234", test); runCurrent()
+            assertEquals(test.offerOptions, peer.offerOptions, test.code)
+            assertEquals(listOf(test.previewQuality), rpc.qualities, test.code)
+            assertIs<CameraLiveSession.State.Streaming>(live.state.value)
+            assertTrue("get_turn_server" in rpc.calls)
+            live.stop(); runCurrent()
+            assertTrue(peer.closed)
+            assertEquals(listOf("test-client-1"), rpc.stoppedIds)
+            live.dispose()
+        }
+    }
+
+    @Test fun selecting_another_test_cannot_overlap_an_attempt_or_change_its_offer() = runTest(timeout = 10.seconds) {
+        val rpc = FakeRpc().apply { startDelay = 300 }
+        val peers = mutableListOf<FakePeer>()
+        var id = 0
+        val live = CameraLiveSession(rpc, { FakePeer().also { peers += it } },
+            CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])),
+            clientId = { "variant-client-${++id}" }, connectTimeoutMs = 5_000, cleanupTimeoutMs = 500)
+        live.start("1234", CameraVideoTest.AUDIO_FIRST); runCurrent()
+        live.start("1234", CameraVideoTest.OEM_LAYOUT_SD)
+        live.stop(); runCurrent()
+        live.start("1234", CameraVideoTest.OEM_LAYOUT_SD)
+        advanceTimeBy(301); runCurrent()
+        assertEquals(listOf("HD"), rpc.qualities)
+        assertEquals(listOf("variant-client-1"), rpc.stoppedIds)
+        assertTrue(peers.isEmpty())
+        rpc.startDelay = 0
+        live.start("1234", CameraVideoTest.OEM_LAYOUT_SD); runCurrent()
+        assertEquals(listOf("HD", "SD"), rpc.qualities)
+        assertEquals(CameraVideoTest.OEM_LAYOUT_SD.offerOptions, peers.single().offerOptions)
+        live.stop(); runCurrent()
+        assertEquals(listOf("variant-client-1", "variant-client-2"), rpc.stoppedIds)
+        live.dispose()
+    }
+
+    @Test fun experiments_change_one_setting_at_each_step() {
+        val a = CameraVideoTest.CURRENT
+        val b = CameraVideoTest.AUDIO_FIRST
+        val c = CameraVideoTest.OEM_LAYOUT
+        val d = CameraVideoTest.OEM_LAYOUT_SD
+        assertEquals(RtcOfferOptions(), a.offerOptions)
+        assertEquals(a.offerOptions.copy(audioFirst = true), b.offerOptions)
+        assertEquals(b.offerOptions.copy(sendReceiveVideo = true), c.offerOptions)
+        assertEquals(c.offerOptions, d.offerOptions)
+        assertEquals(listOf("HD", "HD", "HD", "SD"), listOf(a,b,c,d).map { it.previewQuality })
     }
 
     @Test fun onlyExplicitSuccessfulPinRepliesPass() {
@@ -314,3 +371,4 @@ class CameraLiveSessionTest {
         assertFalse(selectedPairDiagnostics("host", "private-data", "private-data", true).toString().contains("private-data"))
     }
 }
+
