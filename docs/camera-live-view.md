@@ -10,8 +10,11 @@ Activate remote viewing in the official Roborock app while connected to Roborock
 servers, before switching to the local server. Keep your existing camera PIN or
 pattern. The robot, phone and server must be able to reach the configured TURN endpoint.
 
-Open **More → Video (experimental)** and enter that PIN or pattern. **Start video**
-uses the OEM matching connection and requests HD by default. While docked, choose a
+Tap the **video icon beside Settings** (or **More → Video (experimental)**) and
+draw your existing pattern. Pattern entry is the default; an accepted pattern opens
+the viewer automatically. Choose **Use a numeric PIN** for typed entry, then tap
+**Open video** or the keyboard's Done button. The shortcut appears only for supported
+vacuums. The viewer uses the OEM matching connection and requests HD by default. While docked, choose a
 destination on the map and tap **Go**. Video connects once the robot leaves the dock.
 
 The credential remains in memory only while the screen is in the foreground.
@@ -62,12 +65,23 @@ change the volume heard at the robot only when selected; starting a call does no
 change that volume. Exiting or backgrounding video ends the call. An interruption
 mutes the microphone; unmute it explicitly to resume speaking.
 
-Voice calls are experimental and require device validation. They are currently
+Voice calls are experimental. They are currently
 available in the iPhone build; Android call controls remain unavailable.
 
 **Activate Remote Viewing** and **Deactivate Remote Viewing** remain disabled and
 send no commands. Stopping a viewer does not deactivate remote viewing. LocalRock
 does not reset the PIN or take over another viewer.
+
+## Known limitations
+
+- HD/SD switching does not reliably change the received stream on the S7 MaxV.
+  The selected label confirms the requested setting, not a verified quality change.
+- Enabling or disabling remote viewing is unavailable in LocalRock. Use the
+  official app for initial activation as described above; the disabled controls
+  send no commands.
+- Manual driving can intermittently report an unconfirmed or timed-out command.
+  Wait for the robot to stop and for any task to finish before retrying explicitly.
+  LocalRock does not automatically replay failed motion commands.
 
 ## Connection and retry
 

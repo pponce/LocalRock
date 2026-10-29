@@ -238,6 +238,7 @@ fun VacuumDetailScreen(
     val mopMode by viewModel.repository.mopMode.collectAsState()
     val roomCleanModes by viewModel.repository.roomCleanModes.collectAsState()
     val dockSettings by viewModel.repository.dockSettings.collectAsState()
+    val cameraAvailable = liveViewSupported && experimentalCameraSupported(viewModel.modelName)
     var selectedRoomIds by remember { mutableStateOf(emptyList<Int>()) }
 
     var panel by remember { mutableStateOf<DetailPanel?>(null) }
@@ -339,7 +340,7 @@ fun VacuumDetailScreen(
 
     val PanelBody: @Composable (DetailPanel) -> Unit = { currentPanel ->
         when (currentPanel) {
-            DetailPanel.More -> MoreActionsSheetContent(cameraAvailable = liveViewSupported && experimentalCameraSupported(viewModel.modelName), onAction = onMoreAction)
+            DetailPanel.More -> MoreActionsSheetContent(cameraAvailable = cameraAvailable, onAction = onMoreAction)
 
             DetailPanel.Routines -> RoutinesSheetContent(
                 state = routines,
@@ -536,6 +537,11 @@ fun VacuumDetailScreen(
                     }
                 },
                 actions = {
+                    if (cameraAvailable) {
+                        IconButton(onClick = { onMoreAction(MoreAction.CAMERA) }) {
+                            Icon(Icons.Default.Videocam, contentDescription = "Video")
+                        }
+                    }
                     IconButton(onClick = onSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
@@ -600,7 +606,7 @@ fun VacuumDetailScreen(
                             }
                             PanelBody(headed)
                         } else {
-                            MoreActionsSheetContent(cameraAvailable = liveViewSupported && experimentalCameraSupported(viewModel.modelName), onAction = onMoreAction)
+                            MoreActionsSheetContent(cameraAvailable = cameraAvailable, onAction = onMoreAction)
                         }
                     }
 

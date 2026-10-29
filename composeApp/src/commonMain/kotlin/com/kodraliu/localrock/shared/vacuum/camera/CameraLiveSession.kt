@@ -174,6 +174,24 @@ class CameraLiveSession internal constructor(
         if (attemptJob == null) scope.cancel()
     }
 
+    /** Entry validation never allocates a peer, opens a preview or changes robot activation. */
+    internal suspend fun checkCredential(pin: String) {
+        check(!disposed)
+        withTimeout(10_000) { checkedPinHash(pin) }
+    }
+
+    private suspend fun checkedPinHash(pin: String): String {
+        if (pin.isBlank()) throw CameraFailure("Enter your existing camera PIN or pattern.")
+        val hash = md5Hex(pin)
+        val result = command("check_homesec_password", obj("password", hash)).result
+        if (!cameraPinAccepted(result)) {
+            throw CameraFailure(if (cameraPinRejected(result))
+                "The robot rejected this camera PIN or pattern. Enter the existing credential again."
+            else "The robot returned an unrecognized PIN-check response. Camera access was not started.")
+        }
+        return hash
+    }
+
     private suspend fun connect(attempt: Attempt, pin: String) = coroutineScope {
         fun stage(value: String) {
             attempt.stage = value
@@ -184,13 +202,7 @@ class CameraLiveSession internal constructor(
         var remoteIce: Job? = null
         val pc = withTimeout(connectTimeoutMs) {
             stage("Checking PIN")
-            val hash = md5Hex(pin)
-            val pinResult = command("check_homesec_password", obj("password", hash)).result
-            if (!cameraPinAccepted(pinResult)) {
-                throw CameraFailure(if (cameraPinRejected(pinResult))
-                    "The robot rejected this camera PIN or pattern. Enter the existing credential again."
-                else "The robot returned an unrecognized PIN-check response. Camera access was not started.")
-            }
+            val hash = checkedPinHash(pin)
             stage("Checking camera availability")
             if (owner(command("get_homesec_connect_status").result) != "none") {
                 throw CameraFailure("Camera in use. Close live view in the other app, then retry.")

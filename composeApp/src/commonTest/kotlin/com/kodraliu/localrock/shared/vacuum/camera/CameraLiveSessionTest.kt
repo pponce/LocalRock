@@ -316,6 +316,27 @@ class CameraLiveSessionTest {
         }
     }
 
+    @Test fun entry_verification_does_not_start_preview_or_allocate_a_peer() = runTest {
+        val rpc=FakeRpc();val peer=FakePeer();val live=live(rpc,peer)
+        live.checkCredential("1234")
+        assertEquals(listOf("check_homesec_password"),rpc.calls)
+        assertEquals(CameraLiveSession.State.Idle,live.state.value)
+        assertNull(live.peer.value);assertNull(peer.offerOptions);assertFalse(peer.audioActive)
+        live.dispose();runCurrent()
+        assertEquals(listOf("check_homesec_password"),rpc.calls)
+    }
+
+    @Test fun entry_verification_rejects_wrong_or_unrecognized_credentials_without_preview() = runTest {
+        for(result in listOf(JsonPrimitive(false),JsonObject(emptyMap()))) {
+            val rpc=FakeRpc().apply {pinResult=result};val live=live(rpc)
+            val failure=assertFailsWith<CameraFailure> {live.checkCredential("1234")}
+            assertContains(failure.message!!,if(result==JsonPrimitive(false)) "rejected" else "unrecognized")
+            assertEquals(listOf("check_homesec_password"),rpc.calls)
+            assertNull(live.peer.value);assertEquals(CameraLiveSession.State.Idle,live.state.value)
+            live.dispose();runCurrent()
+        }
+    }
+
     @Test fun unexpected_pin_reply_is_not_reported_as_a_wrong_credential() = runTest(timeout = 10.seconds) {
         for (result in listOf(JsonPrimitive(false), JsonObject(emptyMap()))) {
             val rpc = FakeRpc().apply { pinResult = result }
