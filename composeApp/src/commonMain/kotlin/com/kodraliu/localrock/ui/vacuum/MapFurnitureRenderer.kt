@@ -89,6 +89,16 @@ internal fun drawFurnitureSymbol(
         if (outline && !erase) canvas.drawPath(p, cut)
     }
     fun line(vararg points: Pair<Float, Float>) = canvas.drawPath(path(points.toList(), false), cut)
+    fun curve(vararg points: Pair<Float, Float>): List<Pair<Float, Float>> =
+        (0 until (points.size - 1) / 3).flatMap { segment ->
+            val p = points.drop(segment * 3).take(4)
+            (0..16).map { step ->
+                val t = step / 16f; val u = 1f - t
+                fun value(axis: (Pair<Float, Float>) -> Float) =
+                    u*u*u*axis(p[0]) + 3*u*u*t*axis(p[1]) + 3*u*t*t*axis(p[2]) + t*t*t*axis(p[3])
+                value { it.first } to value { it.second }
+            }
+        }
     fun rounded(l: Float, t: Float, r: Float, b: Float, radius: Float = .035f): List<Pair<Float, Float>> {
         val rx = radius.coerceAtMost((r - l) / 2)
         val ry = radius.coerceAtMost((b - t) / 2)
@@ -146,8 +156,8 @@ internal fun drawFurnitureSymbol(
             FurnitureSymbol.DINING_SET -> {
                 for (x in listOf(.2f,.58f)) {
                     box(x,.04f,x+.22f,.32f,.055f); box(x,.68f,x+.22f,.96f,.055f)
-                    line(x to .12f, x+.22f to .12f)
-                    line(x to .88f, x+.22f to .88f)
+                    line(*curve(x to .12f, x+.07f to .07f, x+.15f to .07f, x+.22f to .12f).toTypedArray())
+                    line(*curve(x to .88f, x+.07f to .93f, x+.15f to .93f, x+.22f to .88f).toTypedArray())
                 }
                 box(.08f,.25f,.92f,.75f,.02f)
             }
@@ -176,34 +186,53 @@ internal fun drawFurnitureSymbol(
                 for (x in listOf(.02f,.88f)) for (y in listOf(.02f,.88f)) box(x,y,x+.1f,y+.1f,.02f)
             }
             FurnitureSymbol.PET_BED -> {
-                box(.02f,.04f,.98f,.96f,.09f); box(.15f,.19f,.85f,.81f,.025f)
-                line(.05f to .08f,.15f to .19f); line(.95f to .08f,.85f to .19f)
-                line(.05f to .92f,.15f to .81f); line(.95f to .92f,.85f to .81f)
-                box(.02f,.78f,.3f,.96f,.055f); box(.7f,.78f,.98f,.96f,.055f)
-                box(.3f,.81f,.7f,1f,0f,erase=true)
+                box(.02f,.04f,.98f,.96f,.09f); box(.05f,.08f,.95f,.92f,.065f)
+                box(.15f,.24f,.85f,.77f,.005f)
+                line(.05f to .08f,.15f to .24f); line(.95f to .08f,.85f to .24f)
+                line(.05f to .92f,.15f to .77f); line(.95f to .92f,.85f to .77f)
+                box(.15f,.77f,.32f,.96f,.055f); box(.68f,.77f,.85f,.96f,.055f)
+                box(.32f,.79f,.68f,.84f,0f,erase=true)
+                box(.32f,.89f,.68f,1f,0f,erase=true)
             }
             FurnitureSymbol.PET_BOWLS -> {
                 // 19C: one curved, waisted holder with two recessed bowls.
-                val holder = (0 until 96).map { i ->
-                    val a=i*2*kotlin.math.PI/96
-                    val x=.5f+.48f*cos(a).toFloat()
-                    val waist=.65f+.35f*kotlin.math.abs(cos(a)).toFloat()
-                    x to .5f+.46f*sin(a).toFloat()*waist
-                }
+                val holder = curve(
+                    .02f to .5f, .02f to .12f, .18f to -.04f, .34f to .09f,
+                    .46f to .23f, .54f to .23f, .66f to .09f,
+                    .82f to -.04f, .98f to .12f, .98f to .5f,
+                    .98f to .88f, .82f to 1.04f, .66f to .91f,
+                    .54f to .77f, .46f to .77f, .34f to .91f,
+                    .18f to 1.04f, .02f to .88f, .02f to .5f,
+                )
                 shape(holder)
                 oval(.07f,.15f,.45f,.85f); oval(.55f,.15f,.93f,.85f)
                 oval(.1f,.2f,.42f,.8f); oval(.58f,.2f,.9f,.8f)
             }
             FurnitureSymbol.MIRROR -> {
                 // 20C: original inverted-V support; shallow overhead projection at 8 degrees.
-                shape(listOf(.19f to .92f,.46f to .04f,.5f to .02f,.52f to .08f,.26f to .96f))
-                shape(listOf(.48f to .08f,.5f to .02f,.54f to .04f,.81f to .92f,.74f to .96f))
+                // Rounded ends on the original two diagonal supports, with no rear crossbar.
+                fun support(x0: Float, x1: Float) {
+                    val aspect = 2.2f
+                    val angle = kotlin.math.atan2(.07f - .96f, (x1 - x0) * aspect)
+                    shape(listOf(Triple(x0, .96f, angle + kotlin.math.PI.toFloat()/2),
+                        Triple(x1, .07f, angle - kotlin.math.PI.toFloat()/2)).flatMap { (x,y,start) ->
+                        (0..16).map { i ->
+                            val a = start + i * kotlin.math.PI.toFloat()/16
+                            x + cos(a)*.05f/aspect to y + sin(a)*.05f
+                        }
+                    })
+                }
+                support(.15f,.467f); support(.85f,.533f)
                 shape(listOf(.02f to .68f,.98f to .68f,.94f to .91f,.06f to .91f))
                 line(.07f to .91f,.04f to .72f,.96f to .72f,.93f to .91f)
             }
             FurnitureSymbol.CAT_TOWER -> {
-                shape(listOf(.08f to .08f,.91f to .08f,.96f to .14f,.55f to .94f,
-                    .48f to .98f,.42f to .94f,.03f to .17f))
+                shape(curve(.25f to .12f, .4f to .10f, .8f to .10f, .9f to .1f,
+                    .96f to .1f, .99f to .18f, .94f to .26f,
+                    .8f to .5f, .65f to .78f, .56f to .94f,
+                    .52f to 1f, .47f to 1f, .42f to .93f,
+                    .28f to .7f, .13f to .43f, .08f to .3f,
+                    .03f to .17f, .13f to .12f, .25f to .12f))
                 oval(.39f,.42f,.87f,.91f); oval(.03f,.02f,.58f,.59f); oval(.79f,.13f,.91f,.26f)
             }
             FurnitureSymbol.UNKNOWN -> box(.02f,.02f,.98f,.98f)
