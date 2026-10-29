@@ -117,7 +117,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                     TextButton(onClick = { dismissKeyboard(); typed = !typed; pin = "" }) {
                         Text(if (typed) "Use a pattern" else "Use a numeric PIN", color = Color.White)
                     }
-                    Text("Test A–D in order. Each changes one setting from the previous test. Stop before trying the next tile.",
+                    Text("Start with A, then try B–D. Stop before choosing another tile and follow the capture prompts.",
                         style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                     CameraTestTiles(enabled = pin.isNotBlank(), onStart = { start(it) })
                     Text("All four use the robot's camera. Your phone's microphone and camera are not recorded.",

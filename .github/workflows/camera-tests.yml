@@ -18,7 +18,29 @@ jobs:
           mkdir -p local-work/rtc-offer-check/Sources/RtcOfferCheck
           cp tools/rtc-offer-check/Package.swift local-work/rtc-offer-check/
           cp tools/rtc-offer-check/main.swift iosApp/iosApp/WebRtcOffer.swift local-work/rtc-offer-check/Sources/RtcOfferCheck/
-          swift run --package-path local-work/rtc-offer-check 2>&1 | tee offer-check.log
+          {
+            swift package --package-path local-work/rtc-offer-check resolve
+            python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          root = Path('local-work/rtc-offer-check/.build/artifacts/webrtc/WebRTC/WebRTC.xcframework')
+          headers = root / 'macos-x86_64_arm64/WebRTC.framework/Headers'
+          source = root / 'ios-arm64/WebRTC.framework/Headers'
+          # M149's macOS slice omits public headers other than its umbrella. Use the
+          # matching API headers from the same checksum-verified XCFramework release.
+          # This affects the CI harness only; the iPhone app uses its complete iOS slice.
+          if not (headers / 'RTCAudioSource.h').is_file():
+              assert (source / 'RTCAudioSource.h').is_file()
+              for item in source.glob('*.h'):
+                  if not (headers / item.name).exists():
+                      shutil.copyfile(item, headers / item.name)
+              print('Restored matching M149 API headers for the macOS offer check.')
+          # The absent macOS-only view header is outside this headless peer test.
+          umbrella = headers / 'WebRTC.h'
+          umbrella.write_text(umbrella.read_text().replace('#import <WebRTC/RTCMTLNSVideoView.h>', ''))
+          PY
+            swift run --package-path local-work/rtc-offer-check
+          } 2>&1 | tee offer-check.log
       - name: Publish native offer verification
         if: always() && github.event_name == 'push'
         uses: actions/github-script@v7

@@ -22,6 +22,7 @@ internal fun decodeCameraAnswer(encoded: String): String = try {
         var inString = false
         var escaped = false
         for (char in text) {
+            require(!inString || char >= ' ' || (!escaped && (char == '\r' || char == '\n')))
             when {
                 escaped -> { append(char); escaped = false }
                 char == '\\' && inString -> { append(char); escaped = true }
