@@ -144,6 +144,8 @@ internal class AndroidRtcPeer(iceServers: List<RtcIceServer>) : RtcPeer {
                 remote?.members?.get("candidateType") as? String,
                 local?.members?.get("protocol") as? String,
                 frames > 0L,
+                (video?.members?.get("frameWidth") as? Number)?.toInt() ?: 0,
+                (video?.members?.get("frameHeight") as? Number)?.toInt() ?: 0,
             )
             if (cont.isActive) cont.resume(result)
         }

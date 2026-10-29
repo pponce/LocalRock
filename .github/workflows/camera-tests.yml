@@ -1,9 +1,12 @@
 name: Experimental camera
 on:
   push:
-    branches: [experimental/camera-live-view, experimental/camera-controls]
+    branches: [experimental/camera-live-view, experimental/camera-controls, video-support]
   pull_request:
   workflow_dispatch:
+concurrency:
+  group: camera-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
   checks: write

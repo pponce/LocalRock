@@ -21,20 +21,24 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import com.kodraliu.localrock.shared.vacuum.VacuumStateCodes
 import com.kodraliu.localrock.shared.vacuum.camera.CameraLiveSession
+import com.kodraliu.localrock.shared.vacuum.camera.CameraVideoQuality
 import com.kodraliu.localrock.shared.vacuum.camera.CameraMotionController
 import com.kodraliu.localrock.shared.vacuum.map.MapFormat
 import com.kodraliu.localrock.shared.vacuum.map.ParsedMap
 import com.kodraliu.localrock.shared.webrtc.RtcPeer
+import com.kodraliu.localrock.shared.webrtc.RtcDiagnostics
 import com.kodraliu.localrock.shared.webrtc.RtcVideoView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
@@ -43,9 +47,11 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun CameraVideoControls(
-    viewModel: VacuumViewModel, peer: RtcPeer, motion: CameraMotionController,
+    viewModel: VacuumViewModel, peer: RtcPeer?, motion: CameraMotionController,
     state: CameraLiveSession.State, ready: Boolean, expanded: Boolean,
-    onExpand: (Boolean) -> Unit, onStopVideo: () -> Unit,
+    onExpand: (Boolean) -> Unit, onStopVideo: () -> Unit, onDock: () -> Unit,
+    onRetry: () -> Unit, quality: CameraVideoQuality, qualityEnabled: Boolean, qualityError: String?,
+    diagnostics: RtcDiagnostics, onQuality: (CameraVideoQuality) -> Unit, onRetrySd: () -> Unit,
 ) {
     val status by viewModel.status.collectAsState()
     val map by viewModel.repository.parsedMap.collectAsState()
@@ -54,10 +60,24 @@ internal fun CameraVideoControls(
     val error by motion.error.collectAsState()
     var steering by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
+    var mapExpanded by remember { mutableStateOf(false) }
+    var controlsVisible by remember { mutableStateOf(true) }
+    var interaction by remember { mutableStateOf(0) }
     var target by remember(floor, map?.viewportIdentity(floor)) { mutableStateOf<Pair<Int,Int>?>(null) }
-    val enabled = ready && !busy
-    val headline = status.state?.let { VacuumStateCodes.describe(it) } ?: "Robot status unavailable"
-    // The repository already polls navigation/cleaning rapidly; refresh here only for RC state 4.
+    // Navigation is independent of video: a docked robot must be able to leave through Go.
+    val enabled = !busy
+    val docked = status.state in setOf(VacuumStateCodes.CHARGING, VacuumStateCodes.CHARGING_COMPLETE)
+    val headline = if (status.state == VacuumStateCodes.CHARGING_COMPLETE) "Charged"
+        else status.state?.let { VacuumStateCodes.describe(it) } ?: "Robot status unavailable"
+    fun interact() { controlsVisible = true; interaction++ }
+    LaunchedEffect(expanded, interaction, busy, mapExpanded, settings) {
+        controlsVisible = true
+        if (expanded && !busy && !mapExpanded && !settings) {
+            delay(5_000)
+            controlsVisible = false
+        }
+    }
+    LaunchedEffect(expanded) { if (!expanded) mapExpanded = false }
     LaunchedEffect(viewModel, ready, status.state) {
         if (ready && status.state == VacuumStateCodes.REMOTE_CONTROL_ACTIVE) {
             while (isActive) {
@@ -68,107 +88,140 @@ internal fun CameraVideoControls(
             }
         }
     }
-    fun switchMode() { motion.release(); steering = !steering }
-
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+    fun go() {
+        val point = target ?: return
+        val current = map ?: return
+        val cell = current.mmToCell(point.first,point.second)
+        if (cameraTargetAt(current,Offset(cell.x/current.width,cell.y/current.height)) != null) {
+            motion.goTo(point.first,point.second,floor)
+            mapExpanded = false
+        } else target = null
+    }
+    val targetPanel: @Composable (Modifier, Boolean) -> Unit = { modifier, canClose ->
+        Column(modifier.background(Color(0xffe9edf1))) {
+            Row(Modifier.fillMaxWidth().padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically) {
+                Text("Tap the map to set a target",Modifier.weight(1f),color=Color.DarkGray)
+                if (canClose) IconButton(onClick={mapExpanded=false;interact()}) { Icon(Icons.Default.Close,"Close expanded map",tint=Color.Black) }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center) {
+                val pm=map
+                if (pm==null) Text("Waiting for the map…",color=Color.DarkGray)
+                else CameraTargetMap(pm,floor,target,enabled,{target=it},Modifier.fillMaxSize())
+            }
+            Row(Modifier.fillMaxWidth().padding(10.dp),horizontalArrangement=Arrangement.End) {
+                Button(onClick={go()},enabled=enabled && target!=null) {
+                    Icon(Icons.Default.NearMe,null);Spacer(Modifier.width(6.dp));Text("Go")
+                }
+            }
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) {
+        // Observe interaction without consuming map gestures or hold-to-drive pointer events.
+        awaitPointerEventScope {
+            while (true) {
+                val event=awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.any {it.pressed}) interact()
+            }
+        }
+    }) {
         val landscape = maxWidth > maxHeight
         val wide = expanded && landscape
         val portraitVideoHeight = maxHeight * .43f
-        val video: @Composable (Modifier) -> Unit = { modifier ->
-            Box(modifier.background(Color.Black)) {
-                key(peer) { RtcVideoView(peer, Modifier.fillMaxSize()) }
-                if (status.state in setOf(VacuumStateCodes.CHARGING, VacuumStateCodes.CHARGING_COMPLETE)) {
-                    Text("Video is unavailable while docked. Play starts cleaning to move the robot off the dock.", Modifier.align(Alignment.Center).padding(20.dp), color = Color.White)
-                } else if (state is CameraLiveSession.State.Connecting) {
-                    Text(state.stage, Modifier.align(Alignment.Center).background(Color.Black.copy(alpha=.65f)).padding(12.dp), color=Color.White)
+        val videoModifier = if (expanded) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(portraitVideoHeight)
+        // Keep one native renderer composition site through expansion, rotation and map changes.
+        Box(videoModifier.background(Color.Black)) {
+            peer?.let { currentPeer -> key(currentPeer) { RtcVideoView(currentPeer,Modifier.fillMaxSize()) } }
+            if (docked) {
+                Text("Robot docked. Use Pin-and-Go or Play to move it and view the area.",
+                    Modifier.align(Alignment.Center).padding(horizontal=32.dp,vertical=72.dp),
+                    color=Color.White,textAlign=TextAlign.Center)
+            } else when (val current=state) {
+                is CameraLiveSession.State.Connecting -> Text(current.stage,
+                    Modifier.align(Alignment.Center).background(Color.Black.copy(alpha=.65f)).padding(12.dp),color=Color.White)
+                is CameraLiveSession.State.Failed -> Column(Modifier.align(Alignment.Center).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                    Text(current.message,color=Color.White,textAlign=TextAlign.Center)
+                    Button(onClick=onRetry) { Text("Retry video") }
+                    if(quality==CameraVideoQuality.HD) TextButton(onClick=onRetrySd) {Text("Retry in SD")}
                 }
-                Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(8.dp), verticalAlignment=Alignment.CenterVertically) {
-                    Text(headline, Modifier.weight(1f), color=Color.White)
-                    IconButton(onClick={ motion.release(); settings=true }) { Icon(Icons.Default.MoreVert,"Video settings",tint=Color.White) }
-                }
-                Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp), verticalAlignment=Alignment.CenterVertically) {
-                    Text("SD",color=Color.White,modifier=Modifier.background(Color.Black.copy(alpha=.65f)).padding(8.dp))
-                    Spacer(Modifier.weight(1f))
-                    CameraCleaningButton(viewModel, motion)
-                    IconButton(onClick={ motion.release();onExpand(!expanded) }) {
-                        Icon(if(expanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                            if(expanded) "Exit full screen" else "Expand video",tint=Color.White)
-                    }
-                }
+                else -> Unit
             }
+            Text(headline,Modifier.align(Alignment.TopCenter).padding(top=12.dp).background(Color.Black.copy(alpha=.35f)).padding(horizontal=8.dp),color=Color.White)
+            Text(status.battery?.let {"$it%"} ?: "—%",Modifier.align(Alignment.TopStart).padding(12.dp),color=Color.White)
+            if (controlsVisible || !expanded) Row(Modifier.align(Alignment.TopEnd).padding(4.dp),verticalAlignment=Alignment.CenterVertically) {
+                TextButton(onClick={motion.release();settings=true}) { Text(quality.name,color=Color.White) }
+                IconButton(onClick={motion.release();onExpand(!expanded)}) {
+                    Icon(if(expanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        if(expanded) "Exit full screen" else "Expand video",tint=Color.White)
+                }
+                IconButton(onClick={motion.release();settings=true}) { Icon(Icons.Default.MoreVert,"Video settings",tint=Color.White) }
+            }
+            if (!expanded) CameraCleaningButton(viewModel,motion,modifier=Modifier.align(Alignment.BottomEnd).padding(8.dp))
         }
-        // Keep the native renderer at one composition site across expand/rotate/collapse.
-        // iOS owns a single RTCMTLVideoView per peer; changing its size needs no reattachment.
-        video(if (expanded) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(portraitVideoHeight))
         if (wide) {
-            map?.let { pm -> CameraTargetMap(pm,floor,null,false,{},Modifier.align(Alignment.TopStart).padding(top=48.dp,start=12.dp).size((maxHeight * .28f).coerceAtMost(130.dp))) }
-            CameraDrivePad(motion,ready,Modifier.align(Alignment.BottomStart).padding(16.dp).size((maxHeight * .48f).coerceAtMost(220.dp)))
-            Column(Modifier.align(Alignment.BottomEnd).padding(end=16.dp,bottom=64.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                FilledTonalIconButton(onClick={motion.stop()},modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Stop,"Stop movement") }
-                FilledTonalIconButton(onClick={motion.dock()},enabled=enabled,modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Home,"Return to dock") }
+            if (mapExpanded) {
+                targetPanel(Modifier.align(Alignment.CenterStart).fillMaxHeight().fillMaxWidth(.6f),true)
+            } else {
+                Box(Modifier.align(Alignment.TopStart).padding(top=48.dp,start=12.dp)
+                    .size((maxHeight * .30f).coerceAtMost(150.dp))) {
+                    map?.let {pm->CameraTargetMap(pm,floor,null,false,{},Modifier.fillMaxSize())}
+                    // The overlay owns the tap; the thumbnail itself must not pan behind it.
+                    Box(Modifier.fillMaxSize().semantics { contentDescription="Expand map for Pin-and-Go";onClick {motion.release();mapExpanded=true;true} }
+                        .pointerInput(Unit) {detectTapGestures(onTap={motion.release();mapExpanded=true})})
+                }
+                if (controlsVisible) CameraDrivePad(motion,ready,
+                    Modifier.align(Alignment.BottomStart).padding(16.dp).size((maxHeight*.48f).coerceAtMost(220.dp)))
             }
-            TextButton(onClick=onStopVideo,modifier=Modifier.align(Alignment.BottomCenter)) { Text("Stop video",color=Color.White) }
+            if (controlsVisible) Column(Modifier.align(Alignment.BottomEnd).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                CameraCleaningButton(viewModel,motion,compact=true)
+                FilledTonalIconButton(onClick=onDock,enabled=enabled,modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Home,"Return to dock and end video") }
+            }
+            // Calls stay unavailable until their complete protocol and native audio path are validated.
+            TextButton(onClick={settings=true},modifier=Modifier.align(Alignment.BottomCenter).padding(bottom=16.dp)) {
+                Icon(Icons.Default.MicOff,"Microphone unavailable",tint=Color.LightGray)
+            }
+        } else if (expanded) {
+            if (controlsVisible) Text("Turn your phone sideways for full-screen controls.",
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha=.6f)).padding(16.dp),color=Color.White)
         } else {
             Column(Modifier.fillMaxSize()) {
-                if (expanded) Spacer(Modifier.weight(1f)) else Spacer(Modifier.height(portraitVideoHeight))
-                if (expanded) {
-                    Text("Turn your phone sideways for full-screen controls.",Modifier.fillMaxWidth().background(Color.Black).padding(16.dp),color=Color.White)
-                } else {
-                    Row(Modifier.fillMaxWidth().background(Color(0xff242424)).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically) {
-                        TextButton(onClick={switchMode()}) { Text(if(steering) "Map" else "Controls",color=Color.White) }
-                        Spacer(Modifier.weight(1f))
-                        IconButton(onClick={motion.stop()}) { Icon(Icons.Default.Stop,"Stop movement",tint=Color.White) }
-                        IconButton(onClick={motion.dock()},enabled=enabled) { Icon(Icons.Default.Home,"Return to dock",tint=if(enabled) Color.White else Color.Gray) }
-                        TextButton(onClick=onStopVideo) { Text("Stop video",color=Color.White) }
-                    }
-                    Box(Modifier.fillMaxWidth().weight(1f).background(Color(0xff181818)),contentAlignment=Alignment.Center) {
-                        if(steering) {
-                            BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment=Alignment.Center) {
-                                val padSize = minOf(maxWidth * .85f, (maxHeight - 40.dp).coerceAtLeast(48.dp))
-                                Column(horizontalAlignment=Alignment.CenterHorizontally) {
-                                    CameraDrivePad(motion,ready,Modifier.size(padSize))
-                                    Text("Hold to drive · release to stop",color=Color.LightGray,modifier=Modifier.padding(8.dp))
-                                }
-                            }
-                        } else {
-                            val pm=map
-                            if(pm==null) Text("Waiting for the map…",color=Color.White)
-                            else CameraTargetMap(pm,floor,target,enabled,{target=it},Modifier.fillMaxSize().padding(bottom=60.dp))
-                            Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(10.dp),verticalAlignment=Alignment.CenterVertically) {
-                                Text(if(target==null) "Tap the map to set a target" else "Target selected",Modifier.weight(1f),color=Color.LightGray)
-                                Button(onClick={
-                                    val point=target
-                                    val current=map
-                                    if(point!=null && current!=null) {
-                                        val cell=current.mmToCell(point.first,point.second)
-                                        if(cameraTargetAt(current,Offset(cell.x/current.width,cell.y/current.height))!=null)
-                                            motion.goTo(point.first,point.second,floor)
-                                        else target=null
-                                    }
-                                },enabled=enabled && target!=null) { Text("Go") }
-                            }
+                Spacer(Modifier.height(portraitVideoHeight))
+                Row(Modifier.fillMaxWidth().background(Color(0xff242424)).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically) {
+                    TextButton(onClick={motion.release();steering=!steering}) { Text(if(steering) "Map" else "Controls",color=Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick={motion.stop()}) { Icon(Icons.Default.Stop,"Stop movement",tint=Color.White) }
+                    IconButton(onClick=onDock,enabled=enabled) { Icon(Icons.Default.Home,"Return to dock and end video",tint=if(enabled) Color.White else Color.Gray) }
+                    TextButton(onClick=onStopVideo) { Text("End video",color=Color.White) }
+                }
+                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).background(Color(0xff181818)),contentAlignment=Alignment.Center) {
+                    if (steering) {
+                        val padSize=minOf(maxWidth*.85f,(maxHeight-40.dp).coerceAtLeast(48.dp))
+                        Column(horizontalAlignment=Alignment.CenterHorizontally) {
+                            CameraDrivePad(motion,ready,Modifier.size(padSize))
+                            Text("Hold to drive · release to stop",color=Color.LightGray,modifier=Modifier.padding(8.dp))
                         }
-                    }
+                    } else targetPanel(Modifier.fillMaxSize(),false)
                 }
             }
         }
-        error?.let { Text(it,Modifier.align(Alignment.TopCenter).padding(top=44.dp).background(Color(0xff5b2424)).padding(8.dp),color=Color.White) }
+        error?.let {Text(it,Modifier.align(Alignment.TopCenter).padding(top=44.dp).background(Color(0xff5b2424)).padding(8.dp),color=Color.White)}
     }
     if(settings) AlertDialog(
-        onDismissRequest={settings=false}, title={Text("Remote viewing")},
-        text={
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Video quality: SD")
-                Text("Call volume and microphone calls are not available in this build.")
-                Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                    Text("Activate Remote Viewing")
+        onDismissRequest={settings=false},title={Text("Remote viewing")},
+        text={Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text("Requested video quality")
+            Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                CameraVideoQuality.entries.forEach {value->
+                    FilterChip(selected=quality==value,onClick={onQuality(value)},enabled=qualityEnabled,label={Text(value.name)})
                 }
-                Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                    Text("Deactivate Remote Viewing")
-                }
-                Text("Activate remote viewing in the official Roborock app while connected to Roborock's servers, before switching to the local server. Activation controls are unavailable in LocalRock.")
             }
-        },
+            if(diagnostics.videoWidth>0 && diagnostics.videoHeight>0)
+                Text("Received video: ${diagnostics.videoWidth} × ${diagnostics.videoHeight}")
+            qualityError?.let {Text(it,color=MaterialTheme.colorScheme.error)}
+            Text("Call volume and microphone calls are not available in this build.")
+            Button(onClick={},enabled=false,modifier=Modifier.fillMaxWidth()) {Text("Activate Remote Viewing")}
+            Button(onClick={},enabled=false,modifier=Modifier.fillMaxWidth()) {Text("Deactivate Remote Viewing")}
+            Text("Activate remote viewing in the official Roborock app while connected to Roborock's servers, before switching to the local server. Activation controls are unavailable in LocalRock.")
+        }},
         confirmButton={TextButton(onClick={settings=false}){Text("Done")}},
     )
 }
@@ -176,7 +229,7 @@ internal fun CameraVideoControls(
 @Composable
 private fun CameraDrivePad(motion: CameraMotionController, enabled: Boolean, modifier: Modifier) {
     val scope=rememberCoroutineScope()
-    Box(modifier.clip(CircleShape).background(Color(0xff242424).copy(alpha=.9f))) {
+    Box(modifier.clip(CircleShape).background(Color(0xff242424).copy(alpha=.55f))) {
         val keys=listOf(
             Triple(CameraMotionController.Direction.FORWARD,Alignment.TopCenter,Icons.Default.KeyboardArrowUp),
             Triple(CameraMotionController.Direction.BACKWARD,Alignment.BottomCenter,Icons.Default.KeyboardArrowDown),
@@ -217,7 +270,9 @@ internal fun cameraTargetAt(map: ParsedMap, normalized: Offset): Pair<Int,Int>? 
     val x=(normalized.x*map.width).toInt()
     val y=map.height-1-(normalized.y*map.height).toInt()
     val cell=map.grid.getOrNull(y*map.width+x)?.toInt()?.and(255) ?: return null
-    if(cell==127 || (cell!=128 && map.roomIdAtCell(x,y)==null)) return null
+    val original = map.originalGrid?.getOrNull(y*map.width+x)?.toInt()?.and(255)
+    val scannedRoom = if (original != null) original and 7 == 7 && original ushr 3 > 0 else cell in 1..126
+    if (cell == 127 || (cell != 128 && !scannedRoom)) return null
     val point=map.cellToMm(Offset(normalized.x*map.width,normalized.y*map.height))
     if(point.first !in 0..51_200 || point.second !in 0..51_200) return null
     if(map.noGoZones.any { it.contains(point.first,point.second) }) return null

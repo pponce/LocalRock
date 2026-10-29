@@ -28,7 +28,9 @@ class CameraMotionControllerTest {
             if (method == "app_rc_start") { delay(startDelay); if (enterManualMode) state=7 }
             if (method == "app_rc_end") state=3
             if (method == "app_goto_target") state=16
-            if (method == "app_stop") state=3
+            if (method in setOf("app_stop", "stop_goto_target")) state=3
+            if (method == "app_start") { state=5; cleaning=1 }
+            if (method == "app_charge") { state=6; cleaning=0 }
             return V1Response(null,buildJsonArray {add("ok")},null)
         }
         fun methods() = calls.map {it.first}
@@ -79,14 +81,15 @@ class CameraMotionControllerTest {
         c.dispose();advanceUntilIdle()
     }
 
-    @Test fun release_sends_zero_then_end_and_stops_repeating() = runTest {
+    @Test fun release_uses_oem_stop_and_keeps_manual_session() = runTest {
         val rpc=Rpc();val c=controller(rpc)
         c.hold(CameraMotionController.Direction.FORWARD);runCurrent();advanceTimeBy(450);runCurrent()
         c.release();advanceUntilIdle()
-        assertEquals(listOf("app_rc_move","app_rc_end"),rpc.methods().takeLast(2))
-        val last=rpc.calls[rpc.calls.lastIndex-1].second.jsonArray.single().jsonObject
-        assertEquals(0.0,last["velocity"]!!.jsonPrimitive.double)
-        assertEquals(300,last["duration"]!!.jsonPrimitive.int)
+        assertEquals("app_rc_stop",rpc.methods().last())
+        assertFalse("app_rc_end" in rpc.methods())
+        val last=rpc.calls.last {it.first=="app_rc_move"}.second.jsonArray.single().jsonObject
+        assertEquals(.2,last["velocity"]!!.jsonPrimitive.double)
+        assertEquals(1500,last["duration"]!!.jsonPrimitive.int)
         val sequences=rpc.calls.filter { it.first=="app_rc_move" }.map { it.second.jsonArray.single().jsonObject["seqnum"]!!.jsonPrimitive.int }
         assertEquals((1..sequences.size).toList(),sequences)
         val count=rpc.calls.size;advanceTimeBy(5000);runCurrent();assertEquals(count,rpc.calls.size)
@@ -105,8 +108,7 @@ class CameraMotionControllerTest {
     @Test fun late_start_ack_is_cleaned_without_motion() = runTest {
         val rpc=Rpc().apply {startDelay=800};val c=controller(rpc)
         c.hold(CameraMotionController.Direction.FORWARD);runCurrent();c.release();advanceUntilIdle()
-        assertEquals(listOf("get_status","app_rc_start","app_rc_move","app_rc_end"),rpc.methods())
-        assertEquals(0.0,rpc.calls[2].second.jsonArray.single().jsonObject["velocity"]!!.jsonPrimitive.double)
+        assertEquals(listOf("get_status","app_rc_start","app_rc_stop","app_rc_end"),rpc.methods())
         c.dispose();advanceUntilIdle()
     }
     @Test fun connection_loss_stops_drive_and_reports_failure() = runTest {
@@ -147,7 +149,7 @@ class CameraMotionControllerTest {
         val rpc=Rpc();val c=controller(rpc)
         c.goTo(24500,26000,0);advanceUntilIdle()
         assertEquals("[24500,26000]",rpc.calls.last().second.toString())
-        c.stop();advanceUntilIdle();assertEquals("app_stop",rpc.methods().last())
+        c.stop();advanceUntilIdle();assertEquals("stop_goto_target",rpc.methods().last())
         c.dispose();advanceUntilIdle()
     }
     @Test fun changed_floor_prevents_goto() = runTest {
@@ -177,4 +179,87 @@ class CameraMotionControllerTest {
         assertEquals("app_rc_end",rpc.methods().last())
         val count=rpc.calls.size;c.hold(CameraMotionController.Direction.RIGHT);runCurrent();assertEquals(count,rpc.calls.size)
     }
+    @Test fun repeated_holds_share_manual_session_and_increasing_sequence() = runTest {
+        val rpc=Rpc();val c=controller(rpc)
+        for (direction in CameraMotionController.Direction.entries) {
+            c.hold(direction);runCurrent();advanceTimeBy(250);runCurrent();c.release();advanceUntilIdle()
+        }
+        assertEquals(1,rpc.methods().count {it=="app_rc_start"})
+        assertEquals(4,rpc.methods().count {it=="app_rc_stop"})
+        val moves=rpc.calls.filter {it.first=="app_rc_move"}.map {it.second.jsonArray.single().jsonObject}
+        assertEquals((1..moves.size).toList(),moves.map {it["seqnum"]!!.jsonPrimitive.int})
+        assertTrue(moves.any {it["omega"]!!.jsonPrimitive.double==1.05})
+        assertTrue(moves.any {it["omega"]!!.jsonPrimitive.double== -1.05})
+        c.endViewing();advanceUntilIdle();assertEquals("app_rc_end",rpc.methods().last())
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun pin_and_go_can_undock_before_video_connects() = runTest {
+        val rpc=Rpc().apply {state=8};val c=controller(rpc){false}
+        c.goTo(24500,26000,0);advanceUntilIdle()
+        assertEquals(listOf("get_status","app_goto_target"),rpc.methods())
+        assertTrue(c.viewerStartedActivity.value)
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun manual_mode_owned_by_another_viewer_is_not_used() = runTest {
+        val rpc=Rpc().apply {state=7};val c=controller(rpc)
+        c.hold(CameraMotionController.Direction.LEFT);advanceUntilIdle()
+        assertEquals(listOf("get_status"),rpc.methods())
+        c.dispose();advanceUntilIdle();assertFalse("app_rc_end" in rpc.methods())
+    }
+    @Test fun go_after_driving_keeps_the_manual_session_until_exit() = runTest {
+        val rpc=Rpc();val c=controller(rpc)
+        c.hold(CameraMotionController.Direction.FORWARD);runCurrent();c.release();advanceUntilIdle()
+        c.goTo(24500,26000,0);advanceUntilIdle()
+        assertEquals("app_goto_target",rpc.methods().last());assertFalse("app_rc_end" in rpc.methods())
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun exit_and_dock_matches_charge_then_rc_end_then_camera_cleanup() = runTest {
+        val rpc=Rpc();val c=controller(rpc)
+        c.hold(CameraMotionController.Direction.FORWARD);runCurrent();c.release();advanceUntilIdle()
+        var cameraStopped=false
+        c.dock {cameraStopped=true;rpc.calls += "stop_camera_preview" to JsonObject(emptyMap())}
+        advanceUntilIdle()
+        assertTrue(cameraStopped)
+        assertEquals(listOf("app_charge","app_rc_end","stop_camera_preview"),rpc.methods().takeLast(3))
+        assertFalse(c.viewerStartedActivity.value)
+        c.dispose();advanceUntilIdle();assertFalse("app_stop" in rpc.methods())
+    }
+    @Test fun leaving_video_preserves_an_existing_cleaning_run() = runTest {
+        val rpc=Rpc().apply {state=5;cleaning=1};val c=controller(rpc)
+        var ended=false;c.endViewing {ended=true};advanceUntilIdle()
+        assertTrue(ended);assertFalse(c.viewerStartedActivity.value);assertTrue(rpc.calls.isEmpty())
+        c.dispose();advanceUntilIdle();assertTrue(rpc.calls.isEmpty())
+    }
+    @Test fun video_started_cleaning_can_continue_or_explicitly_return_home() = runTest {
+        for (returnHome in listOf(false,true)) {
+            val rpc=Rpc().apply {state=8};val c=controller(rpc)
+            c.cleaning(CameraCleaningAction.START);advanceUntilIdle()
+            assertTrue(c.viewerStartedActivity.value)
+            c.endViewing(returnToDock=returnHome);advanceUntilIdle()
+            assertEquals(returnHome,"app_charge" in rpc.methods())
+            assertFalse("app_pause" in rpc.methods());assertFalse("app_stop" in rpc.methods())
+            c.dispose();advanceUntilIdle()
+        }
+    }
+    @Test fun resume_does_not_claim_ownership_of_existing_cleaning() = runTest {
+        val rpc=Rpc().apply {state=10;cleaning=2};val c=controller(rpc)
+        c.cleaning(CameraCleaningAction.RESUME);advanceUntilIdle()
+        assertFalse(c.viewerStartedActivity.value)
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun dock_refusal_keeps_viewer_open_and_reports_failure() = runTest {
+        val rpc=Rpc().apply {refuse="app_charge"};val c=controller(rpc)
+        var ended=false;c.dock {ended=true};advanceUntilIdle()
+        assertFalse(ended);assertNotNull(c.error.value)
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun cleaning_after_driving_releases_manual_mode_first() = runTest {
+        val rpc=Rpc();val c=controller(rpc)
+        c.hold(CameraMotionController.Direction.LEFT);runCurrent();c.release();advanceUntilIdle()
+        c.cleaning(CameraCleaningAction.START);advanceUntilIdle()
+        assertTrue(rpc.methods().indexOf("app_rc_end") < rpc.methods().indexOf("app_start"))
+        assertEquals("app_start",rpc.methods().last());assertNull(c.error.value)
+        c.dispose();advanceUntilIdle()
+    }
+
 }

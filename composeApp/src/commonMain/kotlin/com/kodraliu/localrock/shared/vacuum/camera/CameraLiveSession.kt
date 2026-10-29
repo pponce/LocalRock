@@ -56,23 +56,34 @@ class CameraLiveSession internal constructor(
     val diagnostics: StateFlow<RtcDiagnostics> = _diagnostics
     private val _cleanupWarning = MutableStateFlow<String?>(null)
     val cleanupWarning: StateFlow<String?> = _cleanupWarning
+    private val _quality = MutableStateFlow(CameraVideoQuality.SD)
+    val quality: StateFlow<CameraVideoQuality> = _quality
+    private val _qualityBusy = MutableStateFlow(false)
+    val qualityBusy: StateFlow<Boolean> = _qualityBusy
+    private val _qualityError = MutableStateFlow<String?>(null)
+    val qualityError: StateFlow<String?> = _qualityError
+    private var qualityJob: Job? = null
+    private var activeAttempt: Attempt? = null
     private var attemptJob: Job? = null
     private var disposed = false
 
-    private class Attempt(val id: String, val test: CameraVideoTest) {
+    private class Attempt(val id: String, val test: CameraVideoTest, val quality: CameraVideoQuality) {
         var previewRequested = false
         var startAcknowledged = false
         var peer: RtcPeer? = null
         var stage = "Preparing"
     }
 
-    fun start(pin: String, test: CameraVideoTest = CameraVideoTest.OEM_MATCH) {
+    fun start(pin: String, test: CameraVideoTest = CameraVideoTest.OEM_MATCH, quality: CameraVideoQuality = CameraVideoQuality.SD) {
         if (disposed || attemptJob != null) return
         if (pin.isBlank()) {
             _state.value = State.Failed("Enter your existing camera PIN or pattern.")
             return
         }
-        val attempt = Attempt(clientId(), test)
+        val attempt = Attempt(clientId(), test, quality)
+        activeAttempt = attempt
+        _quality.value = quality
+        _qualityError.value = null
         _diagnostics.value = RtcDiagnostics()
         _cleanupWarning.value = null
         _state.value = State.Connecting("Preparing…")
@@ -92,6 +103,8 @@ class CameraLiveSession internal constructor(
                 failure = "${attempt.stage} failed. Check the robot and local server, then retry."
             } finally {
                 _state.value = State.Stopping
+                qualityJob?.cancel()
+                activeAttempt = null
                 _peer.value = null
                 try { attempt.peer?.close() } catch (_: Exception) { /* Continue preview cleanup. */ }
                 withContext(NonCancellable) { releaseOwnedPreview(attempt) }
@@ -112,7 +125,37 @@ class CameraLiveSession internal constructor(
         job.start()
     }
 
+    /** Update the encoder without replacing the peer, renderer, SDP or ICE session. */
+    fun changeQuality(requested: CameraVideoQuality) {
+        val attempt = activeAttempt ?: return
+        if (disposed || _state.value != State.Streaming || qualityJob != null || _quality.value == requested) return
+        _qualityError.value = null
+        _qualityBusy.value = true
+        val next = scope.launch(start = CoroutineStart.LAZY) {
+            val running = currentCoroutineContext()[Job]
+            try {
+                withTimeout(5_000) {
+                    if (owner(command("get_homesec_connect_status").result) != attempt.id)
+                        throw CameraFailure("This viewer no longer owns the camera.")
+                    requireAck(command("switch_video_quality", obj("quality", requested.name)).result, "Video quality")
+                    if (activeAttempt === attempt && _state.value == State.Streaming) _quality.value = requested
+                }
+            } catch (_: TimeoutCancellationException) {
+                _qualityError.value = "The quality change was not confirmed. Check the picture before retrying."
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                _qualityError.value = "The robot did not confirm the quality change. The last confirmed setting is still shown."
+            } finally {
+                if (qualityJob === running) {qualityJob=null;_qualityBusy.value=false}
+            }
+        }
+        qualityJob = next
+        next.invokeOnCompletion { if (qualityJob === next) {qualityJob=null;_qualityBusy.value=false} }
+        next.start()
+    }
+
     fun stop() {
+        qualityJob?.cancel()
         if (attemptJob != null) {
             _state.value = State.Stopping
             attemptJob?.cancel()
@@ -156,7 +199,7 @@ class CameraLiveSession internal constructor(
                     attempt.previewRequested = true
                     val response = try {
                         command("start_camera_preview", buildJsonObject {
-                            put("client_id", attempt.id); put("quality", attempt.test.previewQuality); put("password", hash)
+                            put("client_id", attempt.id); put("quality", attempt.quality.name); put("password", hash)
                         })
                     } catch (e: CameraFailure) {
                         // An explicit robot refusal differs from a lost/late acknowledgement.
