@@ -23,6 +23,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import com.kodraliu.localrock.shared.vacuum.VacuumStateCodes
 import com.kodraliu.localrock.shared.vacuum.camera.CameraMotionController
 import com.kodraliu.localrock.shared.webrtc.RtcConnectionState
 import com.kodraliu.localrock.shared.vacuum.camera.CameraLiveSession
@@ -42,10 +43,16 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     val readyNow by rememberUpdatedState(ready)
     val motion = remember(viewModel) { CameraMotionController(viewModel.repository.session) { readyNow } }
     var expanded by remember { mutableStateOf(false) }
-    val viewing = peer != null && (state is CameraLiveSession.State.Connecting || state == CameraLiveSession.State.Streaming)
-    BackHandler(enabled = expanded) { motion.release(); expanded = false }
-    LaunchedEffect(ready) { if (!ready) motion.stop(includeDock = false) }
-    LaunchedEffect(viewing) { if (!viewing) expanded = false }
+    var viewing by remember { mutableStateOf(false) }
+    var pendingCameraStart by remember { mutableStateOf(false) }
+    var exitDialog by remember { mutableStateOf(false) }
+    var dockDialog by remember { mutableStateOf(false) }
+    var exitNavigates by remember { mutableStateOf(false) }
+    val startedActivity by motion.viewerStartedActivity.collectAsState()
+    val busy by motion.busy.collectAsState()
+    val robotStatus by viewModel.status.collectAsState()
+    val docked = robotStatus.state in setOf(VacuumStateCodes.CHARGING, VacuumStateCodes.CHARGING_COMPLETE)
+    LaunchedEffect(ready) { if (!ready) motion.release() }
     val diagnostics by live.diagnostics.collectAsState()
     val motionError by motion.error.collectAsState()
     val cleanupWarning by live.cleanupWarning.collectAsState()
@@ -61,13 +68,49 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
         if (pin.isNotBlank() && (state == CameraLiveSession.State.Idle || state is CameraLiveSession.State.Failed)) {
             selectedTest = test
             dismissKeyboard()
-            live.start(pin, test)
+            viewing = true
+            pendingCameraStart = docked
+            if (!docked) live.start(pin, test)
         }
     }
 
+    LaunchedEffect(viewing, docked, state) {
+        if (viewing && pendingCameraStart && !docked && pin.isNotBlank() && state == CameraLiveSession.State.Idle) {
+            pendingCameraStart = false
+            live.start(pin, selectedTest)
+        }
+    }
+    fun finish(returnToDock: Boolean = false) {
+        motion.endViewing(returnToDock=returnToDock) {
+            pendingCameraStart = false
+            viewing = false
+            expanded = false
+            exitDialog = false
+            dockDialog = false
+            live.stop()
+            if (exitNavigates) onBack()
+        }
+    }
+    fun requestExit(navigate: Boolean) {
+        dismissKeyboard()
+        motion.release()
+        exitNavigates = navigate
+        if (!viewing) { live.stop(); if (navigate) onBack() }
+        else if (startedActivity) exitDialog = true
+        else finish()
+    }
+    BackHandler {
+        if (expanded) {motion.release(); expanded=false}
+        else requestExit(true)
+    }
     DisposableEffect(live, motion) { onDispose { motion.dispose(); live.dispose() } }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
         pin = ""
+        viewing = false
+        pendingCameraStart = false
+        exitDialog = false
+        dockDialog = false
+        expanded = false
         motion.stop(includeDock = false)
         live.stop()
     }
@@ -78,10 +121,9 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
         contentColor = Color.White,
         topBar = {
             if (!expanded) TopAppBar(
-                title = { Text(if (state == CameraLiveSession.State.Idle) "Video tests"
-                    else "Video ${selectedTest.code} · ${selectedTest.label}", color = Color.White) },
+                title = { Text(if (viewing) "Remote viewing · ${selectedTest.code}" else "Remote viewing", color = Color.White) },
                 navigationIcon = {
-                    IconButton(onClick = { dismissKeyboard(); motion.stop(includeDock = false); live.stop(); onBack() }) {
+                    IconButton(onClick = { requestExit(true) }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Go back", tint = Color.White)
                     }
                 },
@@ -89,7 +131,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
             )
         },
         bottomBar = {
-            if (supported && state == CameraLiveSession.State.Idle) {
+            if (supported && !viewing && state == CameraLiveSession.State.Idle) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     if (typed) TextButton(onClick = { dismissKeyboard() }) { Text("Hide keyboard", color = Color.White) }
@@ -100,21 +142,22 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     ) { insets ->
         Box(Modifier.fillMaxSize().padding(insets), contentAlignment = Alignment.Center) {
             // Attach the renderer while connecting so a first video frame can be decoded.
-            if (viewing) peer?.let { currentPeer ->
-                CameraVideoControls(viewModel, currentPeer, motion, state, ready, expanded,
-                    onExpand = { expanded = it }, onStopVideo = { motion.stop(includeDock = false); live.stop() })
+            if (viewing) {
+                CameraVideoControls(viewModel, peer, motion, state, ready, expanded,
+                    onExpand={expanded=it}, onStopVideo={requestExit(false)},
+                    onDock={motion.release();exitNavigates=false;dockDialog=true},onRetry={start()})
             }
             if (!supported) {
                 Text("Experimental video is currently available for S7 MaxV only, in builds with WebRTC enabled.",
                     Modifier.padding(24.dp), textAlign = TextAlign.Center)
-            } else when (val s = state) {
+            } else if (!viewing) when (val s = state) {
                 CameraLiveSession.State.Idle -> Column(
                     Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(viewModel.deviceName, style = MaterialTheme.typography.titleMedium)
-                    Text("Video is unavailable while docked. Play starts cleaning and moves the robot off the dock.", textAlign = TextAlign.Center)
+                    Text("While docked, open video and use Pin-and-Go or Play to move the robot. Play starts cleaning.", textAlign = TextAlign.Center)
                     CameraCleaningButton(viewModel, motion)
                     motionError?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
                     Text("Enter your existing camera PIN or pattern. Activate remote viewing in the official Roborock app before switching to the local server.",
@@ -175,6 +218,18 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
             }
         }
     }
+    if (exitDialog || dockDialog) AlertDialog(
+        onDismissRequest={if(!busy) {exitDialog=false;dockDialog=false}},
+        title={Text("End video and return to dock?")},
+        text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text("Returning to dock ends the current movement or cleaning task.")
+            motionError?.let {Text(it,color=MaterialTheme.colorScheme.error)}
+            if (exitDialog) TextButton(onClick={finish()},enabled=!busy) {Text("End video only · keep cleaning")}
+        }},
+        confirmButton={TextButton(onClick={finish(returnToDock=true)},enabled=!busy) {Text("Return to dock")}},
+        dismissButton={TextButton(onClick={exitDialog=false;dockDialog=false},enabled=!busy) {Text("Cancel")}},
+    )
+
 }
 
 @Composable

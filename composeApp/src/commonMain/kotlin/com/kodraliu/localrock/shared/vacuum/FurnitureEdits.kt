@@ -97,7 +97,9 @@ data class FurnitureSnapshot(val map: ParsedMap) {
     val placements: List<FurniturePlacement> get() = map.furniture.mapNotNull { it.editablePlacement() }
 }
 
-fun furnitureMapBlocker(map: ParsedMap, mapIndex: Int?): String? = mapIndexBlocker(mapIndex) ?: when {
+fun furnitureMapBlocker(map: ParsedMap, mapIndex: Int?): String? = when {
+    // save_furnitures still uses map_flag=0; the general map editor supports more floors.
+    mapIndex != 0 -> "Furniture editing is available only on the first saved map."
     map.format != MapFormat.LEGACY -> "Furniture editing is not available for this map format yet."
     map.furnitureBlocks.any { !it.hasKnownLayout } -> "This map uses a furniture layout LocalRock cannot edit yet."
     map.furniture.any { it.id !in 1..255 } || map.furniture.map { it.id }.distinct().size != map.furniture.size ->

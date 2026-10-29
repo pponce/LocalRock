@@ -11,8 +11,8 @@ servers, before switching to the local server. Keep your existing camera PIN or
 pattern. The robot, phone and server must be able to reach the configured TURN endpoint.
 
 Open **More → Video (experimental)** and enter that PIN or pattern. Choose **A · OEM
-match** to start. Video is unavailable while the robot is docked: **Start cleaning**
-moves it off the dock by starting a cleaning task.
+match** to open the viewer. While docked, use **Map → Go** to choose a destination,
+or **Play** to start cleaning. Video connects once the robot leaves the dock.
 
 The credential remains in memory only while the screen is in the foreground.
 Leaving or backgrounding the app closes the viewer and clears the credential.
@@ -25,13 +25,18 @@ Opening the map or returning to the app does not start video automatically.
 - **Map → Go** sends an idle robot to the selected floor location.
 - **Controls** opens the directional pad. Hold a direction to move; release to stop.
 - **Stop movement** stops manual driving, navigation started here, or a return to dock.
-- **Home** returns an idle robot to its dock.
+- **Home** offers to end video and return the robot to its dock.
 - **Expand** fills the screen. Turn the phone horizontally for the inset map and
-  overlaid controls. Collapse returns to the portrait layout.
-- **Stop video** closes the viewer. An independently running cleaning task continues.
+  overlaid controls. Tap the inset map to expand it for Pin-and-Go, then close it to
+  return to video. Controls fade after five seconds without interaction; tap video
+  to show them again. Robot status, battery and the map remain visible.
+- **End video** closes the viewer. A cleaning task already running when you opened
+  video continues. If you started cleaning or movement here, the exit prompt also
+  offers to return to dock; you can choose to end video and keep cleaning.
 
-Manual driving and Go require a connected viewer and an idle robot. Leaving video
-stops a held drive and Go navigation started here; a requested return to dock continues.
+Manual driving requires a connected viewer and an idle robot. Go works before video
+connects, including while docked. Leaving video stops a held drive and Go navigation
+started here; a requested return to dock continues.
 
 Video quality is SD. Quality switching, microphone calls and call volume are
 unavailable. **Activate Remote Viewing** and **Deactivate Remote Viewing** are
@@ -41,8 +46,7 @@ remote viewing. LocalRock does not reset the PIN or take over another viewer.
 ## Connection and retry
 
 The screen shows the connection stage and requires decoded frames before reporting
-live video. **Direct** means neither selected media candidate is a TURN relay;
-**Relay** means at least one is. A connection can change between these paths.
+live video.
 
 If another viewer owns the camera, close that viewer and retry. LocalRock releases
 only its own preview session. Wait for cleanup to finish before retrying. If release

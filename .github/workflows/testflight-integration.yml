@@ -3,6 +3,9 @@ on:
   push:
     branches: [testflight/camera-schedules-map-furniture]
   workflow_dispatch:
+concurrency:
+  group: combined-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
   checks: write

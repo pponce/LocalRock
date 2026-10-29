@@ -8,7 +8,7 @@ import kotlinx.serialization.json.*
 
 private class MotionRefused : RuntimeException()
 
-/** One foreground video screen owns these short manual-drive leases. */
+/** One foreground viewer owns the manual session and serializes robot controls. */
 class CameraMotionController internal constructor(
     private val rpc: CameraRpc,
     private val ready: () -> Boolean,
@@ -20,15 +20,20 @@ class CameraMotionController internal constructor(
     )
 
     enum class Direction(val velocity: Double, val omega: Double) {
-        FORWARD(.15, 0.0), BACKWARD(-.15, 0.0), LEFT(0.0, .6), RIGHT(0.0, -.6),
+        FORWARD(.2, 0.0), BACKWARD(-.2, 0.0), LEFT(0.0, 1.05), RIGHT(0.0, -1.05),
     }
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
+    private val _manualMode = MutableStateFlow(false)
+    val manualMode: StateFlow<Boolean> = _manualMode
+    private val _viewerStartedActivity = MutableStateFlow(false)
+    val viewerStartedActivity: StateFlow<Boolean> = _viewerStartedActivity
     private var job: Job? = null
     private var holding = false
     private var haltJob: Job? = null
+    private var sequence = 0
     private var navigationRequested = false
     private var disposed = false
 
@@ -36,86 +41,102 @@ class CameraMotionController internal constructor(
         if (disposed || job != null || haltJob != null) return
         holding = true
         launchOperation {
-            var requested = false
-            var sequence = 0
+            var entered = false
+            var failed = false
             try {
                 requireReady()
-                requireIdle()
-                // A late start acknowledgement must be followed by rc_end even after finger release.
-                withContext(NonCancellable) {
-                    requested = true
-                    try { ack("app_rc_start") } catch (e: MotionRefused) { requested = false; throw e }
+                val status = requireIdle()
+                if (!_manualMode.value || status.state() !in setOf(4, 7)) {
+                    // A late acknowledgement must still be cleaned up after finger release.
+                    withContext(NonCancellable) {
+                        _manualMode.value = true
+                        sequence = 0
+                        try { ack("app_rc_start") }
+                        catch (e: MotionRefused) { _manualMode.value = false; throw e }
+                    }
                 }
                 currentCoroutineContext().ensureActive()
-                // app_rc_start may acknowledge before the robot enters manual mode.
                 withTimeout(1_500) {
                     while (true) {
                         requireReady()
-                        val status = readStatus()
-                        check(status["in_cleaning"]?.jsonPrimitive?.intOrNull == 0)
-                        if (status["state"]?.jsonPrimitive?.intOrNull in setOf(4, 7)) break
+                        val current = readStatus()
+                        requireNoTask(current)
+                        if (current.state() in setOf(4, 7)) break
                         delay(100)
                     }
                 }
+                entered = true
                 while (currentCoroutineContext().isActive) {
                     requireReady()
+                    _viewerStartedActivity.value = true
                     ack("app_rc_move", movement(direction.velocity, direction.omega, ++sequence))
                     delay(200)
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed = true
+                throw e
             } finally {
                 holding = false
-                if (requested) withContext(NonCancellable) {
-                    val zero = runCatching { ack("app_rc_move", movement(0.0, 0.0, ++sequence)) }.isSuccess
-                    val ended = runCatching { ack("app_rc_end") }.isSuccess
-                    if (!zero || !ended) _error.value = "Drive release could not be confirmed. Check the robot before continuing."
+                if (_manualMode.value) withContext(NonCancellable) {
+                    val stopped = runCatching { ack("app_rc_stop") }.isSuccess
+                    if (!stopped) _error.value = "Drive release could not be confirmed. Check the robot before continuing."
+                    // Normal release retains the OEM manual session and its sequence numbers.
+                    if (!entered || failed || !stopped || !ready()) endManualMode()
                 }
             }
         }
     }
 
-    /** Called on pointer-up, cancellation, mode changes and video disconnection. */
+    /** Pointer-up stops motion; leaving the viewer separately ends its manual session. */
     fun release() { if (holding) job?.cancel() }
 
-    /** Shares the manual-control queue, but does not require video while leaving the dock. */
     fun cleaning(action: CameraCleaningAction) = launchOperation {
+        if (_manualMode.value) {
+            check(endManualMode())
+            withTimeout(1_500) {
+                while (readStatus().state() in setOf(4, 7)) delay(100)
+            }
+        }
         val status = readStatus()
-        val method = cameraCleaningCommand(action,
-            status["state"]?.jsonPrimitive?.intOrNull,
+        val method = cameraCleaningCommand(action, status.state(),
             status["in_cleaning"]?.jsonPrimitive?.intOrNull,
             status["error_code"]?.jsonPrimitive?.intOrNull)
             ?: error("The robot's cleaning state changed")
+        if (action == CameraCleaningAction.START) _viewerStartedActivity.value = true
         ack(method)
     }
 
+    /** Pin-and-Go can undock the robot before camera frames are available. */
     fun goTo(x: Int, y: Int, floor: Int) = launchOperation {
-        requireReady()
         require(x in 0..51_200 && y in 0..51_200)
         requireIdle(floor)
         navigationRequested = true
+        _viewerStartedActivity.value = true
         ack("app_goto_target", JsonArray(listOf(JsonPrimitive(x), JsonPrimitive(y))))
     }
 
-    fun dock() = launchOperation {
-        requireReady()
-        if (navigationRequested) {
-            stopNavigation()
-        }
-        requireIdle()
-        ack("app_charge")
+    fun dock(onDocked: () -> Unit = {}) = endViewing(returnToDock = true, onFinished = onDocked)
+
+    /** Finish robot commands before the caller releases the camera preview. */
+    fun endViewing(returnToDock: Boolean = false, onFinished: () -> Unit = {}) = transition {
+        if (returnToDock) {
+            val status = readStatus()
+            check(status["error_code"]?.jsonPrimitive?.intOrNull == 0)
+            check(status.state() in setOf(2, 3, 4, 5, 6, 7, 8, 10, 11, 15, 16, 17, 18, 24, 100))
+            if (status.state() !in setOf(6, 8, 15, 100)) ack("app_charge")
+            navigationRequested = false
+        } else check(stopNavigation())
+        check(endManualMode())
+        _viewerStartedActivity.value = false
+        onFinished()
     }
 
-    /** Explicit Stop may also halt docking; lifecycle cleanup lets a return to dock continue. */
-    fun stop(includeDock: Boolean = true) {
-        if (disposed || haltJob != null) return
-        val previous = job
-        previous?.cancel()
-        val next = scope.launch(start = CoroutineStart.LAZY) {
-            try { previous?.join(); stopNavigation(includeDock) }
-            finally { haltJob = null; _busy.value = false }
-        }
-        haltJob = next
-        _busy.value = true
-        next.start()
+    /** Explicit Stop may halt docking; background cleanup lets a return to dock continue. */
+    fun stop(includeDock: Boolean = true) = transition {
+        stopNavigation(includeDock)
+        endManualMode()
     }
 
     fun dispose() {
@@ -127,8 +148,24 @@ class CameraMotionController internal constructor(
         scope.launch {
             previous?.join()
             pendingHalt?.join()
-            try { stopNavigation() } finally { scope.cancel() }
+            try { stopNavigation(); endManualMode() } finally { scope.cancel() }
         }
+    }
+
+    private fun transition(action: suspend () -> Unit) {
+        if (disposed || haltJob != null) return
+        val previous = job
+        previous?.cancel()
+        val next = scope.launch(start = CoroutineStart.LAZY) {
+            try { previous?.join(); action() }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { _error.value = "Robot control was not confirmed. Check the robot before continuing." }
+            finally { haltJob = null; _busy.value = false }
+        }
+        haltJob = next
+        _error.value = null
+        _busy.value = true
+        next.start()
     }
 
     private fun launchOperation(action: suspend () -> Unit) {
@@ -149,21 +186,40 @@ class CameraMotionController internal constructor(
         next.start()
     }
 
-    private suspend fun stopNavigation(includeDock: Boolean = false) {
-        if (!navigationRequested && !includeDock) return
-        try {
+    private suspend fun endManualMode(): Boolean {
+        if (!_manualMode.value) return true
+        return try {
+            ack("app_rc_end")
+            _manualMode.value = false
+            true
+        } catch (_: Exception) {
+            _error.value = "Ending manual control could not be confirmed. Check the robot."
+            false
+        }
+    }
+
+    private suspend fun stopNavigation(includeDock: Boolean = false): Boolean {
+        if (!navigationRequested && !includeDock) return true
+        return try {
             val status = readStatus()
             // A completed Go must never cause a later cleaning task to be stopped.
-            val state = status["state"]?.jsonPrimitive?.intOrNull
-            val stopGo = navigationRequested && state == 16
-            val stopDock = includeDock && state in setOf(6, 15)
-            if ((stopGo || stopDock) && status["in_cleaning"]?.jsonPrimitive?.intOrNull == 0) ack("app_stop")
+            val state = status.state()
+            if (status["in_cleaning"]?.jsonPrimitive?.intOrNull == 0) {
+                if (navigationRequested && state == 16) ack("stop_goto_target")
+                else if (includeDock && state in setOf(6, 15)) ack("app_stop")
+            }
             navigationRequested = false
-        }
-        catch (_: Exception) { _error.value = "Movement stop could not be confirmed. Check the robot." }
+            true
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { _error.value = "Movement stop could not be confirmed. Check the robot."; false }
     }
 
     private fun requireReady() { check(ready()) { "Video is not connected" } }
+    private fun JsonObject.state() = this["state"]?.jsonPrimitive?.intOrNull
+    private fun requireNoTask(status: JsonObject) {
+        check(status["in_cleaning"]?.jsonPrimitive?.intOrNull == 0)
+        check(status["error_code"]?.jsonPrimitive?.intOrNull == 0)
+    }
 
     private suspend fun readStatus(): JsonObject {
         val response = withTimeout(1_500) { rpc.call("get_status", JsonArray(emptyList())) }
@@ -173,13 +229,13 @@ class CameraMotionController internal constructor(
             ?: error("Status unavailable")
     }
 
-    private suspend fun requireIdle(floor: Int? = null) {
+    private suspend fun requireIdle(floor: Int? = null): JsonObject {
         val status = readStatus()
-        check(status["in_cleaning"]?.jsonPrimitive?.intOrNull == 0)
-        check(status["error_code"]?.jsonPrimitive?.intOrNull == 0)
-        check(status["state"]?.jsonPrimitive?.intOrNull in setOf(2, 3, 8, 24, 100))
+        requireNoTask(status)
+        check(status.state() in setOf(2, 3, 8, 24, 100) ||
+            (_manualMode.value && status.state() in setOf(4, 7)))
         if (floor != null) check(status["map_status"]?.jsonPrimitive?.intOrNull?.shr(2) == floor)
-        requireReady()
+        return status
     }
 
     private suspend fun ack(method: String, params: JsonElement = JsonArray(emptyList())) {
@@ -191,7 +247,7 @@ class CameraMotionController internal constructor(
 
     private fun movement(velocity: Double, omega: Double, sequence: Int) = buildJsonArray {
         add(buildJsonObject {
-            put("velocity", velocity); put("omega", omega); put("duration", 300); put("seqnum", sequence)
+            put("velocity", velocity); put("omega", omega); put("duration", 1500); put("seqnum", sequence)
         })
     }
 }
