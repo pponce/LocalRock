@@ -12,6 +12,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /*
@@ -58,8 +61,9 @@ internal const val SAVE_MAP_TYPE_NO_GO = 0
 internal const val SAVE_MAP_TYPE_WALL = 1
 
 /**
- * Trailing entry the official app always appends to save_map, observed as `[100, 0]` on a robot
- * whose map list held a single map with mapFlag 0. Sent only in that captured situation.
+ * Trailing entry the official app always appends to save_map, `[100, mapFlag]` of the map being
+ * edited: captured as `[100, 0]` on a robot whose only map had mapFlag 0, and `[100, 1]` worked on a
+ * Qrevo S Pro whose only map is map 1 (issue #88).
  */
 internal const val SAVE_MAP_TYPE_MAP_INDEX = 100
 
@@ -86,14 +90,12 @@ fun restrictionSaveBlocker(map: ParsedMap, mapIndex: Int?): String? = mapIndexBl
 private const val MOP_ONLY_AREAS_BLOCK = 23
 
 /**
- * Every captured map edit named map index 0 (save_map's `[100, 0]`, and `"map_index": 0` on
- * carpets and thresholds) on a robot with one saved map. Anything else is not confirmed.
+ * Map edits name the map they change by its mapFlag (save_map's `[100, n]`, and `"map_index": n` on
+ * carpets and thresholds). The map being edited is only certain when the robot holds exactly one map.
+ * That map need not be map 0: a robot that once had a second floor can keep its only map as map 1.
  */
-fun mapIndexBlocker(mapIndex: Int?): String? = when (mapIndex) {
-    null -> "Saving map edits is only supported on robots with a single saved map for now."
-    0 -> null
-    else -> "Saving map edits is only confirmed for map 0. This robot's map is $mapIndex."
-}
+fun mapIndexBlocker(mapIndex: Int?): String? =
+    if (mapIndex == null) "Saving map edits is only supported on robots with a single saved map for now." else null
 
 fun restrictionVertexCount(walls: Int, zones: Int): Int = walls * 2 + zones * 4
 
@@ -171,10 +173,9 @@ internal fun encodeSaveMapParams(noGoZones: List<MapZone>, walls: List<VirtualWa
 
 /**
  * `[walls..., no-go zones..., [100, mapIndex]]`. The S7 takes the same list as its plain params,
- * `[100, 0]` included, and replaces its whole set with it like the S8 does (issue #14).
+ * `[100, mapIndex]` included, and replaces its whole set with it like the S8 does (issue #14).
  */
 internal fun saveMapData(noGoZones: List<MapZone>, walls: List<VirtualWall>, mapIndex: Int): JsonArray {
-    if (mapIndex != 0) throw MapEditException("Saving zones is only confirmed for map index 0")
     val vertices = restrictionVertexCount(walls.size, noGoZones.size)
     if (vertices > MAX_RESTRICTION_VERTICES) {
         throw MapEditException("Too many restrictions: $vertices of $MAX_RESTRICTION_VERTICES points used")
@@ -480,6 +481,51 @@ internal fun labStatusData(labStatus: Int, reserveMap: Int?): JsonArray =
         put("lab_status", JsonPrimitive(labStatus))
         reserveMap?.let { put("reserve_map", JsonPrimitive(it)) }
     })))
+
+/**
+ * The `map_info` entries of get_multi_maps_list. An unnamed map must still be listed: saving zones
+ * relies on the count being right. Each map lists its on-robot backup under `bak_maps`.
+ */
+internal fun parseFloorMapList(mapInfo: JsonArray): List<FloorMap> = mapInfo.mapNotNull { elem ->
+    val o = runCatching { elem.jsonObject }.getOrNull() ?: return@mapNotNull null
+    val flag = o["mapFlag"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
+    val name = o["name"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: "Map ${flag + 1}"
+    val backup = runCatching { o["bak_maps"]?.jsonArray?.firstOrNull()?.jsonObject }.getOrNull()
+    FloorMap(
+        name = name,
+        mapFlag = flag,
+        savedAt = o["add_time"]?.jsonPrimitive?.longOrNull,
+        backupAt = backup?.get("add_time")?.jsonPrimitive?.longOrNull,
+    )
+}
+
+/*
+ * On-robot map backups, from captures of the official app on the S8 Pro Ultra (2026-10-28, with
+ * multi-level maps on and off). The robot keeps one backup per saved map (max_bak_map 1), listed
+ * under the map as bak_maps. Backing up replaces it. Restoring put the map back as it was at backup
+ * time: a no-go zone added after the backup was gone again, a wall in the backup stayed. Neither
+ * used need_retry or start/end_edit_map. The older get_recover_maps answers unknown_method on the
+ * S8 and on the Qrevo Curv 2 Flow.
+ */
+
+/** `{"map_index": 0}`, or `{"is_bak": 1, "map_index": 0}` for the map's backup. */
+internal fun savedMapParams(mapFlag: Int, backup: Boolean): JsonObject = JsonObject(buildMap {
+    if (backup) put("is_bak", JsonPrimitive(1))
+    put("map_index", JsonPrimitive(mapFlag))
+})
+
+/** `{"map_flag": 0}`, the form manual_bak_map and recover_multi_map were captured with. */
+internal fun encodeMapFlagParams(mapFlag: Int): JsonObject = JsonObject(mapOf("map_flag" to JsonPrimitive(mapFlag)))
+
+/** Replaces [mapFlag]'s backup with the map as it is now. Answered ["ok"] within 2 s. */
+suspend fun VacuumSession.backupMap(mapFlag: Int): V1Response =
+    sendCommandRaw("manual_bak_map", encodeMapFlagParams(mapFlag), timeoutMs = MAP_EDIT_TIMEOUT_MS)
+        .requireOk("manual_bak_map")
+
+/** Puts [mapFlag] back to its backup. Answered ["ok"] after about 2.5 s, map_status passing 19. */
+suspend fun VacuumSession.restoreMapBackup(mapFlag: Int): V1Response =
+    sendCommandRaw("recover_multi_map", encodeMapFlagParams(mapFlag), timeoutMs = MAP_EDIT_TIMEOUT_MS)
+        .requireOk("recover_multi_map")
 
 suspend fun VacuumSession.setLabStatus(labStatus: Int, reserveMap: Int?): V1Response =
     sendData("set_lab_status", labStatusData(labStatus, reserveMap))

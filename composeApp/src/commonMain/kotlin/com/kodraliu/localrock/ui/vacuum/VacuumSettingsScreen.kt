@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -49,6 +48,7 @@ import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WaterDrop
@@ -83,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
@@ -107,7 +108,11 @@ import com.kodraliu.localrock.shared.vacuum.DndSettings
 import com.kodraliu.localrock.shared.vacuum.DockCapabilities
 import com.kodraliu.localrock.shared.vacuum.FeatureSection
 import com.kodraliu.localrock.shared.vacuum.inSection
+import com.kodraliu.localrock.shared.vacuum.DockOptions
 import com.kodraliu.localrock.shared.vacuum.DockSettings
+import com.kodraliu.localrock.shared.vacuum.ValleySettings
+import com.kodraliu.localrock.shared.vacuum.dryTimeLabel
+import com.kodraliu.localrock.shared.vacuum.labelFor
 import com.kodraliu.localrock.shared.vacuum.RobotSettings
 import com.kodraliu.localrock.shared.vacuum.VolumeLevels
 import com.kodraliu.localrock.shared.vacuum.volumeLabel
@@ -115,6 +120,7 @@ import com.kodraliu.localrock.shared.vacuum.volumeLevelIndex
 import com.kodraliu.localrock.shared.vacuum.washFrequencyLabel
 import com.kodraliu.localrock.shared.vacuum.map.ParsedMap
 import com.kodraliu.localrock.ui.AppColors
+import com.kodraliu.localrock.ui.adaptive.CenteredContent
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
@@ -130,6 +136,7 @@ private sealed interface SettingsRoute {
     data object Carpet : SettingsRoute
     data object Floor : SettingsRoute
     data object Obstacle : SettingsRoute
+    data object Valley : SettingsRoute
     data object BetaFeatures : SettingsRoute
     data object History : SettingsRoute
 }
@@ -145,7 +152,9 @@ fun VacuumSettingsScreen(
     val repository = viewModel.repository
     var route by remember { mutableStateOf<SettingsRoute>(SettingsRoute.Root) }
     // Sub-pages are local state, not nav destinations, so system back would leave Settings (#52).
-    BackHandler(enabled = route != SettingsRoute.Root) { route = SettingsRoute.Root }
+    BackHandler(enabled = route != SettingsRoute.Root) {
+        route = if (route == SettingsRoute.Valley) SettingsRoute.DockSettings else SettingsRoute.Root
+    }
     val scope = rememberCoroutineScope()
     val consumables by repository.consumableStatus.collectAsState()
     val robotSettings by repository.robotSettings.collectAsState()
@@ -153,6 +162,7 @@ fun VacuumSettingsScreen(
     val status by viewModel.status.collectAsState()
     val busy by viewModel.busy.collectAsState()
     val dndSettings by repository.dndSettings.collectAsState()
+    val valleySettings by repository.valleySettings.collectAsState()
     val cleanHistory by repository.cleanHistory.collectAsState()
     val cleanSummary by repository.cleanSummary.collectAsState()
     val firmwareUpdate by viewModel.firmwareUpdate.collectAsState()
@@ -183,7 +193,10 @@ fun VacuumSettingsScreen(
             onFloor = if (betaFeatures.inSection(FeatureSection.FLOOR).isEmpty()) null else ({ route = SettingsRoute.Floor }),
             onObstacle = if (betaFeatures.inSection(FeatureSection.OBSTACLE).isEmpty()) null else ({ route = SettingsRoute.Obstacle }),
             onDockSettings = {
-                scope.launch { runCatching { repository.fetchDockSettings() } }
+                scope.launch {
+                    runCatching { repository.fetchDockSettings() }
+                    runCatching { repository.fetchValleySettings() }
+                }
                 route = SettingsRoute.DockSettings
             },
             onRobotSettings = {
@@ -242,7 +255,18 @@ fun VacuumSettingsScreen(
             onEmptyWaterTank = { viewModel.run("Emptying the water tank") { it.emptyInbuiltWaterTank() } },
             features = betaFeatures.inSection(FeatureSection.DOCK),
             onFeatureToggle = { id, on -> viewModel.report { it.setBetaFeature(id, on) } },
+            valleySettings = valleySettings,
+            onMopDryingChange = { on -> viewModel.run { it.setMopDrying(on) } },
+            onDryTimeChange = { seconds -> viewModel.run { it.setDryTime(seconds) } },
+            onWashWaterTemperatureChange = { value -> viewModel.run { it.setWashWaterTemperature(value) } },
+            onOpenValley = { route = SettingsRoute.Valley },
             onBack = { route = SettingsRoute.Root },
+        )
+        SettingsRoute.Valley -> ValleyScreen(
+            valleySettings = valleySettings,
+            onEnable = { sh, sm, eh, em -> viewModel.run { it.setValley(sh, sm, eh, em) } },
+            onDisable = { viewModel.run { it.disableValley() } },
+            onBack = { route = SettingsRoute.DockSettings },
         )
         SettingsRoute.RobotSettings -> RobotSettingsScreen(
             robotSettings = robotSettings,
@@ -369,133 +393,135 @@ private fun SettingsRootScreen(
             )
         },
     ) { padding ->
-        LazyColumn(contentPadding = padding) {
-            item {
-                SettingsCategoryRow(
-                    icon = Icons.Default.History,
-                    iconTint = AppColors.AccentCyan,
-                    title = "Cleaning history",
-                    subtitle = "Past cleaning sessions and totals",
-                    onClick = onHistory,
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingsCategoryRow(
-                    icon = Icons.Default.Build,
-                    iconTint = AppColors.Good,
-                    title = "Maintenance",
-                    subtitle = "Brush life and consumables",
-                    onClick = onMaintenance,
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingsCategoryRow(
-                    icon = Icons.Default.GridView,
-                    iconTint = AppColors.Good,
-                    title = "Carpet cleaning",
-                    subtitle = "Carpet mode and deep cleaning",
-                    onClick = onCarpet,
-                )
-            }
-            if (onFloor != null) {
-                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+        CenteredContent {
+            LazyColumn(contentPadding = padding) {
                 item {
                     SettingsCategoryRow(
-                        icon = Icons.Default.CleaningServices,
+                        icon = Icons.Default.History,
                         iconTint = AppColors.AccentCyan,
-                        title = "Floor cleaning",
-                        subtitle = "Floor types, FlexiArm and pet areas",
-                        onClick = onFloor,
+                        title = "Cleaning history",
+                        subtitle = "Past cleaning sessions and totals",
+                        onClick = onHistory,
                     )
                 }
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingsCategoryRow(
-                    icon = Icons.Default.Home,
-                    iconTint = AppColors.Water,
-                    title = "Dock settings",
-                    subtitle = "Auto-empty, wash and dry options",
-                    onClick = onDockSettings,
-                )
-            }
-            if (onObstacle != null) {
                 item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
                 item {
                     SettingsCategoryRow(
-                        icon = Icons.Default.Sensors,
-                        iconTint = AppColors.AccentYellow,
-                        title = "Obstacle avoidance",
-                        subtitle = "Collision and object detection",
-                        onClick = onObstacle,
+                        icon = Icons.Default.Build,
+                        iconTint = AppColors.Good,
+                        title = "Maintenance",
+                        subtitle = "Brush life and consumables",
+                        onClick = onMaintenance,
                     )
                 }
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingsCategoryRow(
-                    icon = Icons.Default.Settings,
-                    iconTint = AppColors.AccentPurple,
-                    title = "Robot settings",
-                    subtitle = "Volume, child lock and more",
-                    onClick = onRobotSettings,
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingsCategoryRow(
-                    icon = Icons.Default.Schedule,
-                    iconTint = AppColors.AccentIndigo,
-                    title = "Do Not Disturb",
-                    subtitle = "Set quiet hours for cleaning",
-                    onClick = onDndMode,
-                )
-            }
-            if (onBetaFeatures != null) {
                 item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
                 item {
                     SettingsCategoryRow(
-                        icon = Icons.Default.Science,
-                        iconTint = AppColors.AccentCyan,
-                        title = "Beta features",
-                        subtitle = "Other options your robot reports",
-                        onClick = onBetaFeatures,
+                        icon = Icons.Default.GridView,
+                        iconTint = AppColors.Good,
+                        title = "Carpet cleaning",
+                        subtitle = "Carpet mode and deep cleaning",
+                        onClick = onCarpet,
                     )
                 }
-            }
+                if (onFloor != null) {
+                    item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                    item {
+                        SettingsCategoryRow(
+                            icon = Icons.Default.CleaningServices,
+                            iconTint = AppColors.AccentCyan,
+                            title = "Floor cleaning",
+                            subtitle = "Floor types, FlexiArm and pet areas",
+                            onClick = onFloor,
+                        )
+                    }
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingsCategoryRow(
+                        icon = Icons.Default.Home,
+                        iconTint = AppColors.Water,
+                        title = "Dock settings",
+                        subtitle = "Auto-empty, wash and dry options",
+                        onClick = onDockSettings,
+                    )
+                }
+                if (onObstacle != null) {
+                    item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                    item {
+                        SettingsCategoryRow(
+                            icon = Icons.Default.Sensors,
+                            iconTint = AppColors.AccentYellow,
+                            title = "Obstacle avoidance",
+                            subtitle = "Collision and object detection",
+                            onClick = onObstacle,
+                        )
+                    }
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingsCategoryRow(
+                        icon = Icons.Default.Settings,
+                        iconTint = AppColors.AccentPurple,
+                        title = "Robot settings",
+                        subtitle = "Volume, child lock and more",
+                        onClick = onRobotSettings,
+                    )
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingsCategoryRow(
+                        icon = Icons.Default.Schedule,
+                        iconTint = AppColors.AccentIndigo,
+                        title = "Do Not Disturb",
+                        subtitle = "Set quiet hours for cleaning",
+                        onClick = onDndMode,
+                    )
+                }
+                if (onBetaFeatures != null) {
+                    item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                    item {
+                        SettingsCategoryRow(
+                            icon = Icons.Default.Science,
+                            iconTint = AppColors.AccentCyan,
+                            title = "Beta features",
+                            subtitle = "Other options your robot reports",
+                            onClick = onBetaFeatures,
+                        )
+                    }
+                }
 
-            item {
-                Text(
-                    "Firmware",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
-                )
-            }
-            item {
-                SettingRowInfo(
-                    icon = Icons.Default.Router,
-                    iconTint = AppColors.AccentIndigo,
-                    title = "Model",
-                    value = modelName ?: "Unknown",
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingRowInfo(
-                    icon = Icons.Default.Memory,
-                    iconTint = AppColors.AccentCyan,
-                    title = "Firmware version",
-                    value = firmwareVersion ?: "Unknown",
-                )
-            }
-            // The update check is hidden for now; FirmwareUpdateRow and the view model stay in place.
-            if (SHOW_FIRMWARE_UPDATE_CHECK) {
+                item {
+                    Text(
+                        "Firmware",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
+                    )
+                }
+                item {
+                    SettingRowInfo(
+                        icon = Icons.Default.Router,
+                        iconTint = AppColors.AccentIndigo,
+                        title = "Model",
+                        value = modelName ?: "Unknown",
+                    )
+                }
                 item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
                 item {
-                    FirmwareUpdateRow(state = firmwareUpdate, onCheck = onCheckUpdate)
+                    SettingRowInfo(
+                        icon = Icons.Default.Memory,
+                        iconTint = AppColors.AccentCyan,
+                        title = "Firmware version",
+                        value = firmwareVersion ?: "Unknown",
+                    )
+                }
+                // The update check is hidden for now; FirmwareUpdateRow and the view model stay in place.
+                if (SHOW_FIRMWARE_UPDATE_CHECK) {
+                    item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                    item {
+                        FirmwareUpdateRow(state = firmwareUpdate, onCheck = onCheckUpdate)
+                    }
                 }
             }
         }
@@ -532,57 +558,59 @@ private fun DndScreen(
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(padding).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+        CenteredContent {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(padding).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Enable quiet hours", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        if (enabled) "${formatTime(startHour, startMinute)} – ${formatTime(endHour, endMinute)}"
-                        else "Robot will clean anytime",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = { enabled = it; commit() },
-                )
-            }
-
-            if (enabled) {
-                HorizontalDivider()
-                Text("Start time", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    NumberStepper2(label = "Hour", value = startHour, range = 0..23, onValueChange = { startHour = it; commit() })
-                    Text(":", style = MaterialTheme.typography.headlineMedium)
-                    NumberStepper2(label = "Minute", value = startMinute, range = 0..59, step = 15, onValueChange = { startMinute = it; commit() })
-                }
-
-                Text("End time", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    NumberStepper2(label = "Hour", value = endHour, range = 0..23, onValueChange = { endHour = it; commit() })
-                    Text(":", style = MaterialTheme.typography.headlineMedium)
-                    NumberStepper2(label = "Minute", value = endMinute, range = 0..59, step = 15, onValueChange = { endMinute = it; commit() })
-                }
-
-                Surface(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = MaterialTheme.shapes.medium,
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    Text(
-                        "Robot won't start cleaning between ${formatTime(startHour, startMinute)} and ${formatTime(endHour, endMinute)}.",
-                        modifier = Modifier.padding(14.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    Column(Modifier.weight(1f)) {
+                        Text("Enable quiet hours", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (enabled) "${formatTime(startHour, startMinute)} – ${formatTime(endHour, endMinute)}"
+                            else "Robot will clean anytime",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = { enabled = it; commit() },
                     )
+                }
+
+                if (enabled) {
+                    HorizontalDivider()
+                    Text("Start time", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NumberStepper2(label = "Hour", value = startHour, range = 0..23, onValueChange = { startHour = it; commit() })
+                        Text(":", style = MaterialTheme.typography.headlineMedium)
+                        NumberStepper2(label = "Minute", value = startMinute, range = 0..59, step = 15, onValueChange = { startMinute = it; commit() })
+                    }
+
+                    Text("End time", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NumberStepper2(label = "Hour", value = endHour, range = 0..23, onValueChange = { endHour = it; commit() })
+                        Text(":", style = MaterialTheme.typography.headlineMedium)
+                        NumberStepper2(label = "Minute", value = endMinute, range = 0..59, step = 15, onValueChange = { endMinute = it; commit() })
+                    }
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        Text(
+                            "Robot won't start cleaning between ${formatTime(startHour, startMinute)} and ${formatTime(endHour, endMinute)}.",
+                            modifier = Modifier.padding(14.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
                 }
             }
         }
@@ -673,91 +701,93 @@ private fun MaintenanceScreen(
             )
         },
     ) { padding ->
-        if (consumables == null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Build,
-                        null,
-                        Modifier.size(48.dp),
-                        MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text("Could not load consumable data", style = MaterialTheme.typography.titleMedium)
-                    OutlinedButton(onClick = onRefresh) { Text("Retry") }
-                }
-            }
-        } else {
-            LazyColumn(contentPadding = padding) {
-                item {
-                    ConsumableItem(
-                        icon = Icons.Default.Cached,
-                        iconTint = AppColors.Good,
-                        title = "Main Brush",
-                        usedSeconds = consumables.mainBrushWorkTime ?: 0L,
-                        maxSeconds = ConsumableStatus.MAIN_BRUSH_LIFETIME_S,
-                        onReset = { onReset("main_brush_work_time") },
-                    )
-                }
-                item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
-                item {
-                    ConsumableItem(
-                        icon = Icons.Default.Autorenew,
-                        iconTint = AppColors.Water,
-                        title = "Side Brush",
-                        usedSeconds = consumables.sideBrushWorkTime ?: 0L,
-                        maxSeconds = ConsumableStatus.SIDE_BRUSH_LIFETIME_S,
-                        onReset = { onReset("side_brush_work_time") },
-                    )
-                }
-                item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
-                item {
-                    ConsumableItem(
-                        icon = Icons.Default.Air,
-                        iconTint = AppColors.AccentPurple,
-                        title = "Filter",
-                        usedSeconds = consumables.filterWorkTime ?: 0L,
-                        maxSeconds = ConsumableStatus.FILTER_LIFETIME_S,
-                        onReset = { onReset("filter_work_time") },
-                    )
-                }
-                item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
-                item {
-                    ConsumableItem(
-                        icon = Icons.Default.Sensors,
-                        iconTint = AppColors.Warn,
-                        title = "Sensor",
-                        usedSeconds = consumables.sensorDirtyTime ?: 0L,
-                        maxSeconds = ConsumableStatus.SENSOR_LIFETIME_S,
-                        onReset = { onReset("sensor_dirty_time") },
-                    )
-                }
-                consumables.cleaningBrushWorkTime?.let { used ->
-                    item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
-                    item {
-                        ConsumableItem(
-                            icon = Icons.Default.CleaningServices,
-                            iconTint = AppColors.AccentCyan,
-                            title = "Maintenance Brush",
-                            usedSeconds = used,
-                            maxSeconds = ConsumableStatus.CLEANING_BRUSH_LIFETIME_S,
-                            onReset = { onReset("cleaning_brush_work_times") },
+        CenteredContent {
+            if (consumables == null) {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Build,
+                            null,
+                            Modifier.size(48.dp),
+                            MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Text("Could not load consumable data", style = MaterialTheme.typography.titleMedium)
+                        OutlinedButton(onClick = onRefresh) { Text("Retry") }
                     }
                 }
-                consumables.strainerWorkTime?.let { used ->
+            } else {
+                LazyColumn(contentPadding = padding) {
+                    item {
+                        ConsumableItem(
+                            icon = Icons.Default.Cached,
+                            iconTint = AppColors.Good,
+                            title = "Main Brush",
+                            usedSeconds = consumables.mainBrushWorkTime ?: 0L,
+                            maxSeconds = ConsumableStatus.MAIN_BRUSH_LIFETIME_S,
+                            onReset = { onReset("main_brush_work_time") },
+                        )
+                    }
                     item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
                     item {
                         ConsumableItem(
-                            icon = Icons.Default.FilterAlt,
-                            iconTint = AppColors.AccentIndigo,
-                            title = "Strainer",
-                            usedSeconds = used,
-                            maxSeconds = ConsumableStatus.STRAINER_LIFETIME_S,
-                            onReset = { onReset("strainer_work_times") },
+                            icon = Icons.Default.Autorenew,
+                            iconTint = AppColors.Water,
+                            title = "Side Brush",
+                            usedSeconds = consumables.sideBrushWorkTime ?: 0L,
+                            maxSeconds = ConsumableStatus.SIDE_BRUSH_LIFETIME_S,
+                            onReset = { onReset("side_brush_work_time") },
                         )
+                    }
+                    item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
+                    item {
+                        ConsumableItem(
+                            icon = Icons.Default.Air,
+                            iconTint = AppColors.AccentPurple,
+                            title = "Filter",
+                            usedSeconds = consumables.filterWorkTime ?: 0L,
+                            maxSeconds = ConsumableStatus.FILTER_LIFETIME_S,
+                            onReset = { onReset("filter_work_time") },
+                        )
+                    }
+                    item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
+                    item {
+                        ConsumableItem(
+                            icon = Icons.Default.Sensors,
+                            iconTint = AppColors.Warn,
+                            title = "Sensor",
+                            usedSeconds = consumables.sensorDirtyTime ?: 0L,
+                            maxSeconds = ConsumableStatus.SENSOR_LIFETIME_S,
+                            onReset = { onReset("sensor_dirty_time") },
+                        )
+                    }
+                    consumables.cleaningBrushWorkTime?.let { used ->
+                        item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
+                        item {
+                            ConsumableItem(
+                                icon = Icons.Default.CleaningServices,
+                                iconTint = AppColors.AccentCyan,
+                                title = "Maintenance Brush",
+                                usedSeconds = used,
+                                maxSeconds = ConsumableStatus.CLEANING_BRUSH_LIFETIME_S,
+                                onReset = { onReset("cleaning_brush_work_times") },
+                            )
+                        }
+                    }
+                    consumables.strainerWorkTime?.let { used ->
+                        item { HorizontalDivider(Modifier.padding(start = 76.dp)) }
+                        item {
+                            ConsumableItem(
+                                icon = Icons.Default.FilterAlt,
+                                iconTint = AppColors.AccentIndigo,
+                                title = "Strainer",
+                                usedSeconds = used,
+                                maxSeconds = ConsumableStatus.STRAINER_LIFETIME_S,
+                                onReset = { onReset("strainer_work_times") },
+                            )
+                        }
                     }
                 }
             }
@@ -850,31 +880,33 @@ private fun HistoryScreen(
             )
         },
     ) { padding ->
-        if (records.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Icon(Icons.Default.History, null, Modifier.size(48.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("No history yet", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Complete a cleaning session to see it here",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                    OutlinedButton(onClick = onRefresh) { Text("Load history") }
+        CenteredContent {
+            if (records.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Icon(Icons.Default.History, null, Modifier.size(48.dp), MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("No history yet", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Complete a cleaning session to see it here",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        OutlinedButton(onClick = onRefresh) { Text("Load history") }
+                    }
                 }
-            }
-        } else {
-            LazyColumn(contentPadding = padding) {
-                if (summary != null) {
-                    item { CleanSummaryCard(summary) }
-                }
-                items(records.sortedByDescending { it.beginEpoch }, key = { it.beginEpoch }) { record ->
-                    CleanRecordRow(record)
-                    HorizontalDivider(Modifier.padding(start = 72.dp))
+            } else {
+                LazyColumn(contentPadding = padding) {
+                    if (summary != null) {
+                        item { CleanSummaryCard(summary) }
+                    }
+                    items(records.sortedByDescending { it.beginEpoch }, key = { it.beginEpoch }) { record ->
+                        CleanRecordRow(record)
+                        HorizontalDivider(Modifier.padding(start = 72.dp))
+                    }
                 }
             }
         }
@@ -980,6 +1012,11 @@ private fun DockSettingsScreen(
     onEmptyWaterTank: () -> Unit,
     features: List<BetaFeatureState>,
     onFeatureToggle: (String, Boolean) -> Unit,
+    valleySettings: ValleySettings?,
+    onMopDryingChange: (Boolean) -> Unit,
+    onDryTimeChange: (Int) -> Unit,
+    onWashWaterTemperatureChange: (Int) -> Unit,
+    onOpenValley: () -> Unit,
     onBack: () -> Unit,
 ) {
     var dialogTarget by remember { mutableStateOf<String?>(null) }
@@ -1008,49 +1045,109 @@ private fun DockSettingsScreen(
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(padding).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DockSettingCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Default.WaterDrop,
-                    iconTint = AppColors.Water,
-                    title = "Mop wash frequency",
-                    value = washFrequencyLabel(smartWash),
-                    enabled = washFrequencyEnabled,
-                    onClick = { dialogTarget = "wash_freq" },
-                )
-                DockSettingCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Default.WaterDrop,
-                    iconTint = AppColors.AccentCyan,
-                    title = "Washing mode",
-                    value = dockCapabilities.washModeLabel(dockSettings.washMode, dockType),
-                    enabled = washModeEnabled,
-                    onClick = { dialogTarget = "wash_mode" },
-                )
+        CenteredContent {
+            LazyColumn(contentPadding = padding) {
+                item {
+                    SettingRowClickable(
+                        icon = Icons.Default.WaterDrop,
+                        iconTint = AppColors.Water,
+                        title = "Mop wash frequency",
+                        subtitle = washFrequencyLabel(smartWash),
+                        enabled = washFrequencyEnabled,
+                        onClick = { dialogTarget = "wash_freq" },
+                    )
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingRowClickable(
+                        icon = Icons.Default.WaterDrop,
+                        iconTint = AppColors.AccentCyan,
+                        title = "Washing mode",
+                        subtitle = dockCapabilities.washModeLabel(dockSettings.washMode, dockType),
+                        enabled = washModeEnabled,
+                        onClick = { dialogTarget = "wash_mode" },
+                    )
+                }
+                dockSettings.washWaterTemperature?.let { temperature ->
+                    item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                    item {
+                        SettingRowClickable(
+                            icon = Icons.Default.Thermostat,
+                            iconTint = AppColors.Warn,
+                            title = "Washing water temperature",
+                            subtitle = DockOptions.washWaterTemperature.labelFor(temperature),
+                            enabled = !busy,
+                            onClick = { dialogTarget = "wash_temp" },
+                        )
+                    }
+                }
+                dockSettings.mopDrying?.let { drying ->
+                    item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                    item {
+                        SettingRowSwitch(
+                            icon = Icons.Default.Air,
+                            iconTint = AppColors.AccentCyan,
+                            title = "Mop drying",
+                            subtitle = if (drying) "Dries the mops on the dock after cleaning" else "Mops are left wet on the dock",
+                            checked = drying,
+                            enabled = !busy,
+                            onCheckedChange = onMopDryingChange,
+                        )
+                    }
+                    dockSettings.dryTimeSeconds?.let { seconds ->
+                        item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                        item {
+                            SettingRowClickable(
+                                icon = Icons.Default.Schedule,
+                                iconTint = AppColors.AccentCyan,
+                                title = "Drying time",
+                                subtitle = dryTimeLabel(seconds),
+                                enabled = !busy,
+                                onClick = { dialogTarget = "dry_time" },
+                            )
+                        }
+                    }
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingRowClickable(
+                        icon = Icons.Default.Delete,
+                        iconTint = AppColors.Good,
+                        title = "Auto-empty mode",
+                        subtitle = dockCapabilities.autoEmptyModeLabel(dockSettings.autoEmptyMode),
+                        enabled = autoEmptyEnabled,
+                        onClick = { dialogTarget = "auto_empty" },
+                    )
+                }
+                valleySettings?.let { valley ->
+                    item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                    item {
+                        SettingRowClickable(
+                            icon = Icons.Default.Schedule,
+                            iconTint = AppColors.Good,
+                            title = "Off-peak electricity",
+                            subtitle = if (valley.enabled) "${clockText(valley.startHour, valley.startMinute)} to ${clockText(valley.endHour, valley.endMinute)}" else "Off",
+                            enabled = !busy,
+                            onClick = onOpenValley,
+                        )
+                    }
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingRowClickable(
+                        icon = Icons.Default.WaterDrop,
+                        iconTint = AppColors.Water,
+                        title = "Internal water tank",
+                        subtitle = "Empty through the dock",
+                        enabled = !busy,
+                        onClick = { confirmEmptyTank = true },
+                    )
+                }
+                items(features, key = { it.def.id }) { f ->
+                    HorizontalDivider(Modifier.padding(start = 72.dp))
+                    FeatureToggleRow(f, onFeatureToggle)
+                }
             }
-            DockSettingCard(
-                modifier = Modifier.fillMaxWidth(),
-                icon = Icons.Default.Delete,
-                iconTint = AppColors.Good,
-                title = "Auto-empty mode",
-                value = dockCapabilities.autoEmptyModeLabel(dockSettings.autoEmptyMode),
-                enabled = autoEmptyEnabled,
-                onClick = { dialogTarget = "auto_empty" },
-            )
-            DockSettingCard(
-                modifier = Modifier.fillMaxWidth(),
-                icon = Icons.Default.WaterDrop,
-                iconTint = AppColors.Water,
-                title = "Internal water tank",
-                value = "Empty through the dock",
-                enabled = !busy,
-                onClick = { confirmEmptyTank = true },
-            )
-            features.forEach { FeatureToggleRow(it, onFeatureToggle) }
         }
     }
 
@@ -1087,6 +1184,22 @@ private fun DockSettingsScreen(
             enabled = washModeEnabled,
             onDismiss = { dialogTarget = null },
         )
+        "wash_temp" -> SimplePickerDialog(
+            title = "Washing water temperature",
+            options = DockOptions.washWaterTemperature.map { it.label },
+            selected = DockOptions.washWaterTemperature.indexOfFirst { it.code == dockSettings.washWaterTemperature },
+            onSelect = { onWashWaterTemperatureChange(DockOptions.washWaterTemperature[it].code); dialogTarget = null },
+            enabled = !busy,
+            onDismiss = { dialogTarget = null },
+        )
+        "dry_time" -> SimplePickerDialog(
+            title = "Drying time",
+            options = DockOptions.dryTime.map { it.label },
+            selected = DockOptions.dryTime.indexOfFirst { it.code == dockSettings.dryTimeSeconds },
+            onSelect = { onDryTimeChange(DockOptions.dryTime[it].code); dialogTarget = null },
+            enabled = !busy,
+            onDismiss = { dialogTarget = null },
+        )
         "auto_empty" -> SimplePickerDialog(
             title = "Auto-empty mode",
             options = autoEmptyModes.map { it.second },
@@ -1098,56 +1211,68 @@ private fun DockSettingsScreen(
     }
 }
 
+private fun clockText(hour: Int, minute: Int) = "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}"
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DockSettingCard(
-    modifier: Modifier,
-    icon: ImageVector,
-    iconTint: Color,
-    title: String,
-    value: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
+private fun ValleyScreen(
+    valleySettings: ValleySettings?,
+    onEnable: (startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) -> Unit,
+    onDisable: () -> Unit,
+    onBack: () -> Unit,
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        enabled = enabled,
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Surface(
-                shape = CircleShape,
-                color = iconTint.copy(alpha = 0.15f),
-                modifier = Modifier.size(36.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, null, Modifier.size(18.dp), iconTint)
-                }
-            }
-            Text(
-                title,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
+    val settings = valleySettings ?: ValleySettings()
+    var enabled by remember(valleySettings?.enabled) { mutableStateOf(settings.enabled) }
+    var startHour by remember(valleySettings) { mutableStateOf(settings.startHour) }
+    var startMinute by remember(valleySettings) { mutableStateOf(settings.startMinute) }
+    var endHour by remember(valleySettings) { mutableStateOf(settings.endHour) }
+    var endMinute by remember(valleySettings) { mutableStateOf(settings.endMinute) }
+
+    fun commit() = if (enabled) onEnable(startHour, startMinute, endHour, endMinute) else onDisable()
+
+    // Each tap on a stepper changes a time, so the robot is written once they stop, not on every tap.
+    var timesTouched by remember { mutableStateOf(false) }
+    LaunchedEffect(startHour, startMinute, endHour, endMinute) {
+        if (!timesTouched) return@LaunchedEffect
+        kotlinx.coroutines.delay(800)
+        commit()
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Off-peak electricity") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
             )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+        },
+    ) { padding ->
+        CenteredContent {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(padding).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                Text(
-                    value,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                )
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    null,
-                    Modifier.size(14.dp),
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Limit charging and drying to off-peak hours", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (enabled) "${clockText(startHour, startMinute)} to ${clockText(endHour, endMinute)}" else "Off",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = enabled, onCheckedChange = { enabled = it; commit() })
+                }
+                if (enabled) {
+                    HorizontalDivider()
+                    Text("Start time", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ClockStepper(startHour, startMinute, onHourChange = { startHour = it; timesTouched = true }, onMinuteChange = { startMinute = it; timesTouched = true })
+                    Text("End time", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ClockStepper(endHour, endMinute, onHourChange = { endHour = it; timesTouched = true }, onMinuteChange = { endMinute = it; timesTouched = true })
+                }
             }
         }
     }
@@ -1214,51 +1339,53 @@ private fun RobotSettingsScreen(
             )
         },
     ) { padding ->
-        LazyColumn(contentPadding = padding) {
-            item {
-                SettingRowClickable(
-                    icon = Icons.Default.Sensors,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = "Find Robot",
-                    subtitle = if (findTriggered) "Beeping…" else "Make the robot beep to locate it",
-                    onClick = { onFindRobot(); findTriggered = true },
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingRowClickable(
-                    icon = Icons.AutoMirrored.Filled.VolumeUp,
-                    iconTint = AppColors.Water,
-                    title = "Volume",
-                    subtitle = volumeLabel,
-                    onClick = { showVolumeDialog = true },
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingRowSwitch(
-                    icon = Icons.Default.Lock,
-                    iconTint = AppColors.Warn,
-                    title = "Child Lock",
-                    subtitle = if (robotSettings.childLock) "Buttons locked on robot" else "Buttons active on robot",
-                    checked = robotSettings.childLock,
-                    onCheckedChange = onChildLockChange,
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
-            item {
-                SettingRowSwitch(
-                    icon = Icons.Default.Lightbulb,
-                    iconTint = AppColors.AccentYellow,
-                    title = "Status LED",
-                    subtitle = if (robotSettings.ledEnabled) "LED indicator on" else "LED indicator off",
-                    checked = robotSettings.ledEnabled,
-                    onCheckedChange = onLedChange,
-                )
-            }
-            items(features, key = { it.def.id }) { f ->
-                HorizontalDivider(Modifier.padding(start = 72.dp))
-                FeatureToggleRow(f, onFeatureToggle)
+        CenteredContent {
+            LazyColumn(contentPadding = padding) {
+                item {
+                    SettingRowClickable(
+                        icon = Icons.Default.Sensors,
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = "Find Robot",
+                        subtitle = if (findTriggered) "Beeping…" else "Make the robot beep to locate it",
+                        onClick = { onFindRobot(); findTriggered = true },
+                    )
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingRowClickable(
+                        icon = Icons.AutoMirrored.Filled.VolumeUp,
+                        iconTint = AppColors.Water,
+                        title = "Volume",
+                        subtitle = volumeLabel,
+                        onClick = { showVolumeDialog = true },
+                    )
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingRowSwitch(
+                        icon = Icons.Default.Lock,
+                        iconTint = AppColors.Warn,
+                        title = "Child Lock",
+                        subtitle = if (robotSettings.childLock) "Buttons locked on robot" else "Buttons active on robot",
+                        checked = robotSettings.childLock,
+                        onCheckedChange = onChildLockChange,
+                    )
+                }
+                item { HorizontalDivider(Modifier.padding(start = 72.dp)) }
+                item {
+                    SettingRowSwitch(
+                        icon = Icons.Default.Lightbulb,
+                        iconTint = AppColors.AccentYellow,
+                        title = "Status LED",
+                        subtitle = if (robotSettings.ledEnabled) "LED indicator on" else "LED indicator off",
+                        checked = robotSettings.ledEnabled,
+                        onCheckedChange = onLedChange,
+                    )
+                }
+                items(features, key = { it.def.id }) { f ->
+                    HorizontalDivider(Modifier.padding(start = 72.dp))
+                    FeatureToggleRow(f, onFeatureToggle)
+                }
             }
         }
     }
@@ -1311,10 +1438,12 @@ private fun FeatureSectionScreen(
             )
         },
     ) { padding ->
-        LazyColumn(contentPadding = padding) {
-            items(features, key = { it.def.id }) { f ->
-                FeatureToggleRow(f, onToggle)
-                HorizontalDivider(Modifier.padding(start = 72.dp))
+        CenteredContent {
+            LazyColumn(contentPadding = padding) {
+                items(features, key = { it.def.id }) { f ->
+                    FeatureToggleRow(f, onToggle)
+                    HorizontalDivider(Modifier.padding(start = 72.dp))
+                }
             }
         }
     }
@@ -1339,19 +1468,21 @@ private fun CarpetScreen(
             )
         },
     ) { padding ->
-        LazyColumn(contentPadding = padding) {
-            item {
-                SettingRowClickable(
-                    icon = Icons.Default.GridView,
-                    iconTint = AppColors.Good,
-                    title = "Carpet mode",
-                    subtitle = options.getOrElse(carpetMode) { "Standard" },
-                    onClick = { showDialog = true },
-                )
-            }
-            items(features, key = { it.def.id }) { f ->
-                HorizontalDivider(Modifier.padding(start = 72.dp))
-                FeatureToggleRow(f, onToggle)
+        CenteredContent {
+            LazyColumn(contentPadding = padding) {
+                item {
+                    SettingRowClickable(
+                        icon = Icons.Default.GridView,
+                        iconTint = AppColors.Good,
+                        title = "Carpet mode",
+                        subtitle = options.getOrElse(carpetMode) { "Standard" },
+                        onClick = { showDialog = true },
+                    )
+                }
+                items(features, key = { it.def.id }) { f ->
+                    HorizontalDivider(Modifier.padding(start = 72.dp))
+                    FeatureToggleRow(f, onToggle)
+                }
             }
         }
     }
@@ -1387,103 +1518,105 @@ private fun BetaFeaturesScreen(
             )
         },
     ) { padding ->
-        LazyColumn(contentPadding = padding) {
-            item {
-                Text(
-                    "Options your robot reports as supported. Once on, the robot uses them during its cleaning cycle.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(16.dp),
-                )
-            }
-            if (loading) {
+        CenteredContent {
+            LazyColumn(contentPadding = padding) {
                 item {
                     Text(
-                        "Checking your robot…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-            } else if (features.isEmpty() && unlisted.isEmpty()) {
-                item {
-                    Text(
-                        "Your robot doesn't report any beta features.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-            }
-            items(features, key = { it.def.id }) { f ->
-                Column {
-                    SettingRowSwitch(
-                        icon = Icons.Default.Science,
-                        iconTint = AppColors.AccentCyan,
-                        title = f.def.title,
-                        subtitle = f.def.description,
-                        checked = f.enabled,
-                        onCheckedChange = { onToggle(f.def.id, it) },
-                    )
-                    Text(
-                        "Robot reply: ${f.raw}",
-                        style = MaterialTheme.typography.labelSmall,
+                        "Options your robot reports as supported. Once on, the robot uses them during its cleaning cycle.",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 76.dp, end = 16.dp, bottom = 10.dp),
+                        modifier = Modifier.padding(16.dp),
                     )
-                    HorizontalDivider(Modifier.padding(start = 72.dp))
                 }
-            }
-            if (unlisted.isNotEmpty()) {
-                item {
-                    Surface(onClick = { showUnlisted = !showUnlisted }, color = Color.Transparent) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Also advertised by your robot", style = MaterialTheme.typography.bodyLarge)
+                if (loading) {
+                    item {
+                        Text(
+                            "Checking your robot…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                } else if (features.isEmpty() && unlisted.isEmpty()) {
+                    item {
+                        Text(
+                            "Your robot doesn't report any beta features.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                }
+                items(features, key = { it.def.id }) { f ->
+                    Column {
+                        SettingRowSwitch(
+                            icon = Icons.Default.Science,
+                            iconTint = AppColors.AccentCyan,
+                            title = f.def.title,
+                            subtitle = f.def.description,
+                            checked = f.enabled,
+                            onCheckedChange = { onToggle(f.def.id, it) },
+                        )
+                        Text(
+                            "Robot reply: ${f.raw}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 76.dp, end = 16.dp, bottom = 10.dp),
+                        )
+                        HorizontalDivider(Modifier.padding(start = 72.dp))
+                    }
+                }
+                if (unlisted.isNotEmpty()) {
+                    item {
+                        Surface(onClick = { showUnlisted = !showUnlisted }, color = Color.Transparent) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Also advertised by your robot", style = MaterialTheme.typography.bodyLarge)
+                                    Text(
+                                        "${unlisted.size} features with no controls yet",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Icon(
+                                    if (showUnlisted) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (showUnlisted) "Hide" else "Show",
+                                )
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                    if (showUnlisted) {
+                        item {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                                 Text(
-                                    "${unlisted.size} features with no controls yet",
+                                    "These are the feature bits your robot reports that LocalRock has no switch for. " +
+                                        "Tell us which you want, and your robot model, on GitHub.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                            }
-                            Icon(
-                                if (showUnlisted) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                contentDescription = if (showUnlisted) "Hide" else "Show",
-                            )
-                        }
-                    }
-                    HorizontalDivider()
-                }
-                if (showUnlisted) {
-                    item {
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            Text(
-                                "These are the feature bits your robot reports that LocalRock has no switch for. " +
-                                    "Tell us which you want, and your robot model, on GitHub.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            TextButton(onClick = { uriHandler.openUri(BETA_FEATURES_ISSUE_URL) }) {
-                                Text("Report on GitHub")
-                            }
-                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                Text("Feature", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                Text("Bit", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                TextButton(onClick = { uriHandler.openUri(BETA_FEATURES_ISSUE_URL) }) {
+                                    Text("Report on GitHub")
+                                }
+                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                    Text("Feature", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                    Text("Bit", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                }
                             }
                         }
-                    }
-                    items(unlisted, key = { it.bit }) { f ->
-                        Column(Modifier.padding(horizontal = 16.dp)) {
-                            HorizontalDivider()
-                            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                                Text(
-                                    f.name ?: "Unnamed",
-                                    Modifier.weight(1f),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (f.name == null) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
-                                )
-                                Text(f.bit.toString(), style = MaterialTheme.typography.bodyMedium)
+                        items(unlisted, key = { it.bit }) { f ->
+                            Column(Modifier.padding(horizontal = 16.dp)) {
+                                HorizontalDivider()
+                                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                                    Text(
+                                        f.name ?: "Unnamed",
+                                        Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (f.name == null) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
+                                    )
+                                    Text(f.bit.toString(), style = MaterialTheme.typography.bodyMedium)
+                                }
                             }
                         }
                     }
@@ -1499,11 +1632,12 @@ private fun SettingRowClickable(
     iconTint: Color,
     title: String,
     subtitle: String,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    Surface(onClick = onClick, color = Color.Transparent) {
+    Surface(onClick = onClick, enabled = enabled, color = Color.Transparent) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.38f).padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -1613,6 +1747,7 @@ private fun SettingRowSwitch(
     title: String,
     subtitle: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
@@ -1627,7 +1762,7 @@ private fun SettingRowSwitch(
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -1649,49 +1784,51 @@ private fun RemoteControlScreen(
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                "Tap to move the robot",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(48.dp))
+        CenteredContent {
             Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.Center,
             ) {
-                RcButton(Icons.Default.KeyboardArrowUp, "Forward") { onMove(0.3, 0.0) }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                Text(
+                    "Tap to move the robot",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(48.dp))
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    RcButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Turn left") { onMove(0.0, 0.3) }
-                    FilledIconButton(
-                        onClick = onStop,
-                        modifier = Modifier.size(72.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        ),
+                    RcButton(Icons.Default.KeyboardArrowUp, "Forward") { onMove(0.3, 0.0) }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Default.Stop, "Stop", Modifier.size(32.dp))
+                        RcButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Turn left") { onMove(0.0, 0.3) }
+                        FilledIconButton(
+                            onClick = onStop,
+                            modifier = Modifier.size(72.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                            ),
+                        ) {
+                            Icon(Icons.Default.Stop, "Stop", Modifier.size(32.dp))
+                        }
+                        RcButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Turn right") { onMove(0.0, -0.3) }
                     }
-                    RcButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Turn right") { onMove(0.0, -0.3) }
+                    RcButton(Icons.Default.KeyboardArrowDown, "Backward") { onMove(-0.3, 0.0) }
                 }
-                RcButton(Icons.Default.KeyboardArrowDown, "Backward") { onMove(-0.3, 0.0) }
+                Spacer(Modifier.height(32.dp))
+                Text(
+                    "Each tap moves the robot for 1.5 seconds",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Spacer(Modifier.height(32.dp))
-            Text(
-                "Each tap moves the robot for 1.5 seconds",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }

@@ -731,6 +731,43 @@ class VacuumRepository(
     }
 
     /**
+     * Replace [mapFlag]'s on-robot backup with the map as it is now. Confirmed by the backup's time
+     * changing in the map list; it is the robot's clock, so it is compared with the old time.
+     */
+    suspend fun backupFloorMap(mapFlag: Int): Unit = mapEditMutex.withLock {
+        val before = requireFloorMap(mapFlag).backupAt
+        session.backupMap(mapFlag)
+        fetchFloorMaps()
+        val after = _floorMaps.value.find { it.mapFlag == mapFlag }?.backupAt
+        if (after == null || after == before) throw MapEditException(NOT_CONFIRMED)
+    }
+
+    /**
+     * Put [mapFlag] back to its on-robot backup. Everything changed on the map since the backup is
+     * lost. Only for the loaded map, the case that was captured. Confirmed by the map's saved time
+     * changing, as it did right after the robot's "ok" in the capture.
+     */
+    suspend fun restoreFloorMapBackup(mapFlag: Int): Unit = mapEditMutex.withLock {
+        val floor = requireFloorMap(mapFlag)
+        if (floor.backupAt == null) throw MapEditException("This map has no backup on the robot yet")
+        if (mapFlag != currentFloorFlag.value) throw MapEditException("Load this map first, then restore its backup")
+        session.restoreMapBackup(mapFlag)
+        var restored = false
+        for (attempt in 0 until STATUS_READBACK_ATTEMPTS) {
+            if (attempt > 0) delay(STATUS_READBACK_DELAY_MS)
+            runCatching { fetchFloorMaps() }
+            val savedAt = _floorMaps.value.find { it.mapFlag == mapFlag }?.savedAt
+            restored = savedAt != null && savedAt != floor.savedAt
+            if (restored) break
+        }
+        if (!restored) throw MapEditException(NOT_CONFIRMED)
+        runCatching { refreshStatus() }
+        rawSegmentTable = null
+        runCatching { fetchMap() }
+        runCatching { rooms() }
+    }
+
+    /**
      * Send the robot out to map the home from its dock, while the robot has room for another map
      * (captured with none left on a one-map robot, and with 2 of 4). The new map is kept only
      * once [saveNewMap] stores it.
@@ -981,6 +1018,59 @@ class VacuumRepository(
         _dockSettings.update { it.copy(smartWash = frequency) }
         val empty = runCatching { session.getDustCollectionMode().requireOk("get_dust_collection_mode").result as? JsonObject }.getOrNull()
         _dockSettings.update { it.copy(autoEmptyMode = (empty?.get("mode") as? JsonPrimitive)?.intOrNull) }
+        val dryer = runCatching { session.getDryerSetting().requireOk("app_get_dryer_setting").result as? JsonObject }.getOrNull()
+        (dryer?.get("status") as? JsonPrimitive)?.intOrNull?.let { status ->
+            val seconds = ((dryer["on"] as? JsonObject)?.get("dry_time") as? JsonPrimitive)?.intOrNull
+            _dockSettings.update { it.copy(mopDrying = status == 1, dryTimeSeconds = seconds, dryerAnswer = dryer) }
+        }
+        // The read answers {"wash_water_temperature": n}, where the setter takes {"values": n}.
+        val temperature = runCatching { session.getWashWaterTemperature().requireOk("get_wash_water_temperature").result as? JsonObject }.getOrNull()
+        _dockSettings.update { it.copy(washWaterTemperature = (temperature?.get("wash_water_temperature") as? JsonPrimitive)?.intOrNull) }
+    }
+
+    suspend fun setMopDrying(enabled: Boolean) {
+        // Sends back everything the robot reported, so the switch alone cannot change how long a run lasts.
+        val reported = _dockSettings.value.dryerAnswer
+        val body = dryerSettingBody(reported, enabled, if (reported == null) _dockSettings.value.dryTimeSeconds else null)
+        session.setDryerSetting(body).requireOk("app_set_dryer_setting")
+        _dockSettings.update { it.copy(mopDrying = enabled, dryerAnswer = body) }
+    }
+
+    suspend fun setDryTime(seconds: Int) {
+        val body = dryerSettingBody(_dockSettings.value.dryerAnswer, _dockSettings.value.mopDrying ?: true, seconds)
+        session.setDryerSetting(body).requireOk("app_set_dryer_setting")
+        _dockSettings.update { it.copy(dryTimeSeconds = seconds, dryerAnswer = body) }
+    }
+
+    suspend fun setWashWaterTemperature(value: Int) {
+        session.setWashWaterTemperature(value).requireOk("set_wash_water_temperature")
+        _dockSettings.update { it.copy(washWaterTemperature = value) }
+    }
+
+    private val _valleySettings = MutableStateFlow<ValleySettings?>(null)
+    val valleySettings: StateFlow<ValleySettings?> = _valleySettings
+
+    suspend fun fetchValleySettings() {
+        val answer = session.getValleyElectricityTimer().requireOk("get_valley_electricity_timer").result
+        val obj = (answer as? JsonArray)?.firstOrNull() as? JsonObject ?: answer as? JsonObject ?: return
+        fun int(key: String) = (obj[key] as? JsonPrimitive)?.intOrNull
+        _valleySettings.value = ValleySettings(
+            enabled = int("enabled") == 1,
+            startHour = int("start_hour") ?: 22,
+            startMinute = int("start_minute") ?: 0,
+            endHour = int("end_hour") ?: 6,
+            endMinute = int("end_minute") ?: 0,
+        )
+    }
+
+    suspend fun setValley(startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) {
+        session.setValleyElectricityTimer(startHour, startMinute, endHour, endMinute).requireOk("set_valley_electricity_timer")
+        _valleySettings.value = ValleySettings(true, startHour, startMinute, endHour, endMinute)
+    }
+
+    suspend fun disableValley() {
+        session.closeValleyElectricityTimer().requireOk("close_valley_electricity_timer")
+        _valleySettings.update { it?.copy(enabled = false) }
     }
 
     suspend fun setWashMode(mode: Int) {
@@ -1082,13 +1172,7 @@ class VacuumRepository(
         } ?: return
         val mapInfoArr = obj["map_info"]?.jsonArray ?: return
         _maxFloorMaps.value = obj["max_multi_map"]?.jsonPrimitive?.intOrNull
-        _floorMaps.value = mapInfoArr.mapNotNull { elem ->
-            val o = runCatching { elem.jsonObject }.getOrNull() ?: return@mapNotNull null
-            val flag = o["mapFlag"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
-            // An unnamed map must still be listed: saving zones relies on the count being right.
-            val name = o["name"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: "Map ${flag + 1}"
-            FloorMap(name, flag)
-        }
+        _floorMaps.value = parseFloorMapList(mapInfoArr)
         _floorMapsLoaded.value = true
     }
 
@@ -1129,6 +1213,17 @@ class VacuumRepository(
      * [VacuumSession] tracks a single outstanding map request — two at once orphaned the first.
      */
     suspend fun fetchMap(): MapResponse = mapFetchMutex.withLock { fetchMapLocked() }
+
+    /**
+     * A saved map, or with [backup] its on-robot backup, for showing in the map list. It takes its
+     * turn with the live map, since the session tracks one map request at a time.
+     */
+    suspend fun fetchSavedMap(mapFlag: Int, backup: Boolean): ParsedMap = mapFetchMutex.withLock {
+        val resp = session.fetchSavedMap(createSecurityData(rriotKeyProvider()), mapFlag, backup)
+        runCatching { parseB01Map(resp.data) }.getOrNull()
+            ?: runCatching { parseLegacyMap(resp.data) }.getOrNull()
+            ?: throw MapEditException("The robot sent a map this app can't read")
+    }
 
     private val photoMutex = Mutex()
     private val obstaclePhotos = mutableMapOf<String, ByteArray>()
