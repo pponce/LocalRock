@@ -113,7 +113,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(viewModel.deviceName, style = MaterialTheme.typography.titleMedium)
-                    Text("Enter your existing camera PIN or pattern. Live view uses your robot's current camera activation and local server.",
+                    Text("Enter your existing camera PIN or pattern. Activate remote viewing in the official Roborock app before switching to the local server.",
                         textAlign = TextAlign.Center)
                     if (typed) {
                         OutlinedTextField(

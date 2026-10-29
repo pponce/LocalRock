@@ -133,7 +133,8 @@ layout. Driving stops when the screen pauses, the connection drops, or a held
 gesture is cancelled. Go-to navigation started here is stopped when leaving video;
 a requested return to dock is allowed to continue.
 
-The video remains SD. Call volume, microphone calls, live quality switching and
-remote-viewing activation are not available in this controls preview. Change those
-settings in the OEM app. Stopping a viewing session does not deactivate the robot's
-remote-viewing feature.
+The video remains SD. Call volume, microphone calls and live quality switching are
+not available in this controls preview. Activate and Deactivate Remote Viewing are
+shown disabled and send no commands. Activate remote viewing in the official Roborock
+app while connected to Roborock's servers, before switching to the local server.
+Stopping a viewing session does not deactivate the robot's remote-viewing feature.

@@ -155,7 +155,19 @@ internal fun CameraVideoControls(
     }
     if(settings) AlertDialog(
         onDismissRequest={settings=false}, title={Text("Remote viewing")},
-        text={Text("Video quality: SD\n\nCall volume, microphone calls and remote-viewing activation are not available in this build. Use the OEM app to change those settings.")},
+        text={
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Video quality: SD")
+                Text("Call volume and microphone calls are not available in this build.")
+                Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                    Text("Activate Remote Viewing")
+                }
+                Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                    Text("Deactivate Remote Viewing")
+                }
+                Text("Activate remote viewing in the official Roborock app while connected to Roborock's servers, before switching to the local server. Activation controls are unavailable in LocalRock.")
+            }
+        },
         confirmButton={TextButton(onClick={settings=false}){Text("Done")}},
     )
 }
