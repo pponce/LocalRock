@@ -49,7 +49,7 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
     private var voiceActive = false
     private var remoteAudioMuted = true
     private var activatedAudioSession = false
-    private var previousAudioCategory: (String, String, AVAudioSession.CategoryOptions)?
+    private var previousAudioCategory: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
     private static weak var audioOwner: WebRtcPeer?
     // Access renderer state only on the main queue.
     private var rendererClosed = false
@@ -200,12 +200,12 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
             }
             if self.voiceActive { onSuccess(); return }
             let audio = RTCAudioSession.sharedInstance()
-            self.previousAudioCategory = (audio.session.category.rawValue, audio.session.mode.rawValue, audio.session.categoryOptions)
+            self.previousAudioCategory = (audio.session.category, audio.session.mode, audio.session.categoryOptions)
             WebRtcPeer.audioOwner = self
             audio.lockForConfiguration()
             do {
-                try audio.setCategory(AVAudioSession.Category.playAndRecord.rawValue,
-                    mode: AVAudioSession.Mode.voiceChat.rawValue, options: [.defaultToSpeaker, .allowBluetooth])
+                try audio.setCategory(.playAndRecord,
+                    mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
                 try audio.setActive(true)
                 self.activatedAudioSession = true
                 audio.unlockForConfiguration()
