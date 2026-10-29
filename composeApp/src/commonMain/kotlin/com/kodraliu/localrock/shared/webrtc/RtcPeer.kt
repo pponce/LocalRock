@@ -17,17 +17,21 @@ data class RtcIceCandidate(
 
 enum class RtcConnectionState { NEW, CONNECTING, CONNECTED, DISCONNECTED, FAILED, CLOSED }
 
+/** Audio first, send/receive capabilities and a named audio stream, without local capture tracks. */
+data class RtcOfferOptions(val compactCodecs: Boolean = false)
 
 interface RtcPeer {
     val localCandidates: SharedFlow<RtcIceCandidate>
     val connectionState: StateFlow<RtcConnectionState>
 
-    suspend fun createOffer(): String
+    suspend fun createOffer(options: RtcOfferOptions = RtcOfferOptions()): String
     suspend fun setRemoteAnswer(sdp: String)
-    fun addRemoteCandidate(candidate: RtcIceCandidate)
+    suspend fun addRemoteCandidate(candidate: RtcIceCandidate)
+    suspend fun diagnostics(): RtcDiagnostics
     fun close()
 }
 
 expect val liveViewSupported: Boolean
 
 expect fun createRtcPeer(iceServers: List<RtcIceServer>): RtcPeer
+
