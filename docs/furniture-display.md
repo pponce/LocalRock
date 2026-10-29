@@ -3,8 +3,8 @@
 The Furniture layer and editor use all 21 S7 MaxV picker choices: two beds, TV stand,
 three sofas, two chaise sofas, dining set, square and coffee tables, shoe rack,
 wardrobe, nightstand, two litter boxes, pet cage, pet bed, pet bowls, floor mirror,
-and cat tower. These are LocalRock vector illustrations, not OEM assets. Their
-saved four-corner footprints control position, rotation and dimensions.
+and cat tower. The vector illustrations use a uniform gray fill with transparent detail cutouts.
+Saved four-corner footprints control position, rotation and dimensions.
 
 Open **Edit map → Furniture**, using the tile below the zone tools. Save or discard
 any pending zone edits first. The furniture editor loads a fresh map. Add an item
@@ -25,7 +25,7 @@ Small-screen controls scroll without covering the whole map. Starting dimensions
 are convenient LocalRock sizes based on observed saved footprints; they are not
 verified OEM defaults or minimum/maximum limits.
 
-This first version supports the verified legacy 23-byte furniture layout with
+Furniture editing supports the legacy 23-byte furniture layout with
 stable object IDs and one saved map (map flag 0). It requires a finished cleaning
 task and a loaded saved map. Unknown record layouts block editing. Hidden,
 unknown-type, or malformed furniture stays untouched and is never included in
@@ -41,10 +41,3 @@ another save. Success requires fresh map readback including preservation of
 untouched and hidden records. Restriction sets and room definitions are not
 rewritten by furniture editing.
 
-The catalog and wire format are grounded in OEM captures and final map readback.
-In-place rotation/movement were observed; resizing uses that same corner-update
-format and still needs LocalRock device validation. Adding and saving a bed has
-been confirmed on LocalRock hardware. The corner controls, return navigation,
-resize, rotate, move, delete, discard and reconnect behavior still need device
-validation before upstream submission. Camera signaling and general map UI
-changes remain on their separate feature branches.
