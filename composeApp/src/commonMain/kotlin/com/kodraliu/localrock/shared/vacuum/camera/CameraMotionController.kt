@@ -6,9 +6,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.*
 
-/** One foreground video screen owns these short manual-drive leases. */
 private class MotionRefused : RuntimeException()
 
+/** One foreground video screen owns these short manual-drive leases. */
 class CameraMotionController internal constructor(
     private val rpc: CameraRpc,
     private val ready: () -> Boolean,

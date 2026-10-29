@@ -28,10 +28,9 @@ import com.kodraliu.localrock.shared.webrtc.RtcConnectionState
 import com.kodraliu.localrock.shared.vacuum.camera.CameraLiveSession
 import com.kodraliu.localrock.shared.vacuum.camera.CameraVideoTest
 import com.kodraliu.localrock.shared.vacuum.camera.experimentalCameraSupported
-import com.kodraliu.localrock.shared.webrtc.RtcVideoView
 import com.kodraliu.localrock.shared.webrtc.liveViewSupported
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     val live = remember(viewModel) { CameraLiveSession(viewModel.repository.session) }

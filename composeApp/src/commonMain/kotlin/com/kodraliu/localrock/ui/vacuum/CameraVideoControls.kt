@@ -36,6 +36,8 @@ import com.kodraliu.localrock.shared.vacuum.map.MapFormat
 import com.kodraliu.localrock.shared.vacuum.map.ParsedMap
 import com.kodraliu.localrock.shared.webrtc.RtcPeer
 import com.kodraliu.localrock.shared.webrtc.RtcVideoView
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -55,6 +57,17 @@ internal fun CameraVideoControls(
     var target by remember(floor, map?.viewportIdentity(floor)) { mutableStateOf<Pair<Int,Int>?>(null) }
     val enabled = ready && !busy
     val headline = status.state?.let { VacuumStateCodes.describe(it) } ?: "Robot status unavailable"
+    // The repository already polls navigation/cleaning rapidly; refresh here only for RC state 4.
+    LaunchedEffect(viewModel, ready, status.state) {
+        if (ready && status.state == VacuumStateCodes.REMOTE_CONTROL_ACTIVE) {
+            while (isActive) {
+                try { viewModel.repository.fetchMap() }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { /* Keep the last map while video remains usable. */ }
+                delay(3_000)
+            }
+        }
+    }
     fun switchMode() { motion.release(); steering = !steering }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
@@ -116,7 +129,16 @@ internal fun CameraVideoControls(
                             else CameraTargetMap(pm,floor,target,enabled,{target=it},Modifier.fillMaxSize().padding(bottom=60.dp))
                             Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(10.dp),verticalAlignment=Alignment.CenterVertically) {
                                 Text(if(target==null) "Tap the map to set a target" else "Target selected",Modifier.weight(1f),color=Color.LightGray)
-                                Button(onClick={target?.let { motion.goTo(it.first,it.second,floor) }},enabled=enabled && target!=null) { Text("Go") }
+                                Button(onClick={
+                                    val point=target
+                                    val current=map
+                                    if(point!=null && current!=null) {
+                                        val cell=current.mmToCell(point.first,point.second)
+                                        if(cameraTargetAt(current,Offset(cell.x/current.width,cell.y/current.height))!=null)
+                                            motion.goTo(point.first,point.second,floor)
+                                        else target=null
+                                    }
+                                },enabled=enabled && target!=null) { Text("Go") }
                             }
                         }
                     }
