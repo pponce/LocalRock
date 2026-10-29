@@ -17,8 +17,8 @@ data class RtcIceCandidate(
 
 enum class RtcConnectionState { NEW, CONNECTING, CONNECTED, DISCONNECTED, FAILED, CLOSED }
 
-/** Advertised capabilities only. No option creates a local microphone or camera capture track. */
-data class RtcOfferOptions(val audioFirst: Boolean = false, val sendReceiveVideo: Boolean = false)
+/** Audio first, send/receive capabilities and a named audio stream, without local capture tracks. */
+data class RtcOfferOptions(val compactCodecs: Boolean = false)
 
 interface RtcPeer {
     val localCandidates: SharedFlow<RtcIceCandidate>

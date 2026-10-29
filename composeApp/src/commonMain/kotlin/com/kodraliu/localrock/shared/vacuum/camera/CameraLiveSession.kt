@@ -4,6 +4,7 @@ import com.kodraliu.localrock.shared.protocol.V1Response
 import com.kodraliu.localrock.shared.vacuum.VacuumSession
 import com.kodraliu.localrock.shared.webrtc.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -29,7 +30,7 @@ class CameraLiveSession internal constructor(
     private val createPeer: (List<RtcIceServer>) -> RtcPeer,
     private val scope: CoroutineScope,
     private val clientId: () -> String = {
-        Random.nextBytes(8).joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
+        Random.nextBytes(4).joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
     },
     private val connectTimeoutMs: Long = 60_000,
     private val cleanupTimeoutMs: Long = 12_000,
@@ -65,7 +66,7 @@ class CameraLiveSession internal constructor(
         var stage = "Preparing"
     }
 
-    fun start(pin: String, test: CameraVideoTest = CameraVideoTest.CURRENT) {
+    fun start(pin: String, test: CameraVideoTest = CameraVideoTest.OEM_MATCH) {
         if (disposed || attemptJob != null) return
         if (pin.isBlank()) {
             _state.value = State.Failed("Enter your existing camera PIN or pattern.")
@@ -198,49 +199,57 @@ class CameraLiveSession internal constructor(
             }
             stage("Sending video offer")
             val offer = peer.createOffer(attempt.test.offerOptions)
-            command("send_sdp_to_robot", obj("app_sdp", encode(buildJsonObject {
-                put("type", "offer"); put("sdp", offer)
-            })))
+            command("send_sdp_to_robot", obj("app_sdp", encodeCameraOffer(offer, attempt.test.literalSdpLineBreaks)))
             offerSent.complete(Unit)
+            // Ask for robot ICE while its SDP is pending, as the OEM does. Native WebRTC must
+            // still receive the answer first. Bound and deduplicate candidates until that point.
+            val answerApplied = CompletableDeferred<Unit>()
+            val candidates = Channel<RtcIceCandidate>(64)
+            fun pollRemoteIce(): Job = signalingScope.launch {
+                val seen = mutableSetOf<String>()
+                try {
+                    while (isActive) {
+                        val entries = objectResult(command("get_device_ice").result)?.get("dev_ice")
+                        when {
+                            entries == JsonPrimitive("retry") -> Unit
+                            entries is JsonArray -> entries.forEach { entry ->
+                                val raw = (entry as? JsonPrimitive)?.contentOrNull
+                                    ?: throw CameraFailure("The robot returned invalid video candidates.")
+                                if (seen.add(raw)) {
+                                    if (seen.size > 256) throw CameraFailure("The robot returned too many video candidates.")
+                                    val obj = decodeObject(raw, "video candidate")
+                                    val candidate = (obj["candidate"] as? JsonPrimitive)?.contentOrNull
+                                        ?: throw CameraFailure("The robot returned an invalid video candidate.")
+                                    candidates.send(RtcIceCandidate(
+                                        (obj["sdpMid"] as? JsonPrimitive)?.contentOrNull,
+                                        (obj["sdpMLineIndex"] as? JsonPrimitive)?.intOrNull ?: 0,
+                                        candidate,
+                                    ))
+                                }
+                            }
+                            else -> throw CameraFailure("The robot returned invalid video candidates.")
+                        }
+                        delay(1_000)
+                    }
+                } finally { candidates.close() }
+            }
+            signalingScope.launch {
+                answerApplied.await()
+                for (candidate in candidates) peer.addRemoteCandidate(candidate)
+            }
+            if (attempt.test.earlyRemoteIce) remoteIce = pollRemoteIce()
             stage("Waiting for robot answer")
             var answer: String? = null
             while (answer == null) {
                 val raw = objectResult(command("get_device_sdp").result)?.get("dev_sdp") as? JsonPrimitive
                     ?: throw CameraFailure("The robot returned an invalid video answer.")
                 if (raw.content == "retry") { delay(1_000); continue }
-                val decoded = decodeObject(raw.content, "video answer")
-                answer = (decoded["sdp"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-                if (decoded["type"] != JsonPrimitive("answer") || answer == null) {
-                    throw CameraFailure("The robot returned an invalid video answer.")
-                }
+                answer = decodeCameraAnswer(raw.content)
             }
             stage("Applying robot answer")
             peer.setRemoteAnswer(answer)
-            remoteIce = signalingScope.launch {
-                val seen = mutableSetOf<String>()
-                while (isActive) {
-                    val entries = objectResult(command("get_device_ice").result)?.get("dev_ice")
-                    when {
-                        entries == JsonPrimitive("retry") -> Unit
-                        entries is JsonArray -> entries.forEach { entry ->
-                            val raw = (entry as? JsonPrimitive)?.contentOrNull
-                                ?: throw CameraFailure("The robot returned invalid video candidates.")
-                            if (seen.add(raw)) {
-                                val obj = decodeObject(raw, "video candidate")
-                                val candidate = (obj["candidate"] as? JsonPrimitive)?.contentOrNull
-                                    ?: throw CameraFailure("The robot returned an invalid video candidate.")
-                                peer.addRemoteCandidate(RtcIceCandidate(
-                                    (obj["sdpMid"] as? JsonPrimitive)?.contentOrNull,
-                                    (obj["sdpMLineIndex"] as? JsonPrimitive)?.intOrNull ?: 0,
-                                    candidate,
-                                ))
-                            }
-                        }
-                        else -> throw CameraFailure("The robot returned invalid video candidates.")
-                    }
-                    delay(1_000)
-                }
-            }
+            answerApplied.complete(Unit)
+            if (!attempt.test.earlyRemoteIce) remoteIce = pollRemoteIce()
             stage("Connecting video")
             peer.connectionState.first { connection ->
                 when (connection) {

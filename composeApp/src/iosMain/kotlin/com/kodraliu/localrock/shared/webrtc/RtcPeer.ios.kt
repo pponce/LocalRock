@@ -30,7 +30,7 @@ interface RtcNativePeerListener {
 /** A single peer connection, implemented in Swift. Non-suspend so Swift can implement it. */
 interface RtcNativePeer {
     /** Advertises the selected test's capabilities without creating local capture tracks. */
-    fun createOffer(audioFirst: Boolean, sendReceiveVideo: Boolean,
+    fun createOffer(compactCodecs: Boolean,
         onSuccess: (String) -> Unit, onError: (String) -> Unit)
     fun setRemoteAnswer(sdp: String, onSuccess: () -> Unit, onError: () -> Unit)
     fun addRemoteCandidate(sdpMid: String?, sdpMLineIndex: Int, candidate: String, onSuccess: () -> Unit, onError: () -> Unit)
@@ -80,8 +80,7 @@ internal class IosRtcPeer(
 
     override suspend fun createOffer(options: RtcOfferOptions): String = suspendCancellableCoroutine { cont ->
         native.createOffer(
-            audioFirst = options.audioFirst,
-            sendReceiveVideo = options.sendReceiveVideo,
+            compactCodecs = options.compactCodecs,
             onSuccess = { sdp -> if (cont.isActive) cont.resume(sdp) },
             onError = { _ -> if (cont.isActive) cont.resumeWithException(RuntimeException("Video offer creation failed")) },
         )

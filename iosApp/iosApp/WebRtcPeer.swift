@@ -33,6 +33,7 @@ final class WebRtcNativeFactory: NSObject, RtcNativePeerFactory {
 final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
 
     private let listener: RtcNativePeerListener
+    private let factory: RTCPeerConnectionFactory
     private let peerConnection: RTCPeerConnection
     private let videoView: RTCMTLVideoView
     private var remoteVideoTrack: RTCVideoTrack?
@@ -41,6 +42,7 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
 
     init?(factory: RTCPeerConnectionFactory, iceServers: [RtcNativeIceServer], listener: RtcNativePeerListener) {
         self.listener = listener
+        self.factory = factory
 
         let config = RTCConfiguration()
         config.sdpSemantics = .unifiedPlan
@@ -67,20 +69,13 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
 
     // MARK: RtcNativePeer
 
-    func createOffer(audioFirst: Bool, sendReceiveVideo: Bool,
+    func createOffer(compactCodecs: Bool,
                      onSuccess: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
-        let recvVideo = RTCRtpTransceiverInit()
-        recvVideo.direction = sendReceiveVideo ? .sendRecv : .recvOnly
-
-        let recvAudio = RTCRtpTransceiverInit()
-        // Offer bidirectional audio capability without attaching a capture track.
-        recvAudio.direction = .sendRecv
-        if audioFirst {
-            peerConnection.addTransceiver(of: .audio, init: recvAudio)
-            peerConnection.addTransceiver(of: .video, init: recvVideo)
-        } else {
-            peerConnection.addTransceiver(of: .video, init: recvVideo)
-            peerConnection.addTransceiver(of: .audio, init: recvAudio)
+        do {
+            try WebRtcOffer.configure(peerConnection, factory: factory, compactCodecs: compactCodecs)
+        } catch {
+            onError("Video offer configuration failed")
+            return
         }
 
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
