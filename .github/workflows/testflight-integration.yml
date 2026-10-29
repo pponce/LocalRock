@@ -1,7 +1,7 @@
 name: Combined TestFlight validation
 on:
   push:
-    branches: [testflight/camera-schedules-map-furniture]
+    branches: [testflight/camera-schedules-map-furniture, review/testflight-ui-feedback-20261029]
   workflow_dispatch:
 concurrency:
   group: combined-${{ github.ref }}
@@ -101,4 +101,5 @@ jobs:
               conclusion: '${{ job.status }}' === 'success' ? 'success' : 'failure',
               output: {title: 'Shared iOS and Swift app compilation', summary: 'Unsigned Release iPhone archive with schedules, map layers, furniture and camera; hardware testing is separate.',
                 text: '```text\n' + log.slice(-48000) + '\n```'}});
+
 

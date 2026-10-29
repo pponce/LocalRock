@@ -115,6 +115,11 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     }
     DisposableEffect(live, motion) { onDispose { motion.dispose(); live.dispose() } }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        motion.release()
+        live.voice.muteMicrophone(true)
+    }
+    // A microphone permission prompt can pause the app without backgrounding it.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
         pin = ""
         viewing = false
         pendingCameraStart = false
@@ -129,6 +134,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
         modifier = Modifier.imePadding(),
         containerColor = Color.Black,
         contentColor = Color.White,
+        contentWindowInsets = if (expanded) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
         topBar = {
             if (!expanded) TopAppBar(
                 title = { Text(if (viewing) "Remote viewing · ${selectedTest.code}" else "Remote viewing", color = Color.White) },
@@ -154,6 +160,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
             // Attach the renderer while connecting so a first video frame can be decoded.
             if (viewing) {
                 CameraVideoControls(viewModel, peer, motion, state, ready, expanded,
+                    voice=live.voice,
                     onExpand={expanded=it}, onStopVideo={requestExit(false)},
                     onDock={motion.release();exitNavigates=false;dockDialog=true},onRetry={start()},
                     quality=if(pendingCameraStart || state is CameraLiveSession.State.Failed) preferredQuality else confirmedQuality,
@@ -205,7 +212,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                     Button(onClick={start(CameraVideoTest.OEM_MATCH)},enabled=pin.isNotBlank()) {Text("Start video")}
                     TextButton(onClick={showConnectionTests=!showConnectionTests}) {Text("Connection tests (SD)")}
                     if(showConnectionTests) CameraTestTiles(enabled=pin.isNotBlank(),onStart={start(it,CameraVideoQuality.SD)})
-                    Text("Your phone's microphone and camera are not recorded.",
+                    Text("Video does not use your phone's camera. Your microphone is used only during a voice call; audio is not saved.",
                         style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                     cleanupWarning?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
                 }
@@ -275,4 +282,5 @@ private fun CameraTestTiles(enabled: Boolean, onStart: (CameraVideoTest) -> Unit
         }
     }
 }
+
 

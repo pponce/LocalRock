@@ -11,8 +11,8 @@ servers, before switching to the local server. Keep your existing camera PIN or
 pattern. The robot, phone and server must be able to reach the configured TURN endpoint.
 
 Open **More → Video (experimental)** and enter that PIN or pattern. **Start video**
-uses the OEM matching connection and requests HD by default. While docked, use **Map → Go** to choose a destination,
-or **Play** to start cleaning. Video connects once the robot leaves the dock.
+uses the OEM matching connection and requests HD by default. While docked, choose a
+destination on the map and tap **Go**. Video connects once the robot leaves the dock.
 
 The credential remains in memory only while the screen is in the foreground.
 Leaving or backgrounding the app closes the viewer and clears the credential.
@@ -20,8 +20,8 @@ Opening the map or returning to the app does not start video automatically.
 
 ## Video and cleaning controls
 
-- **Play** starts cleaning, or resumes the current paused task. Room and zone tasks
-  retain their scope. During cleaning it becomes **Pause**.
+- **Play** is available off the dock to start cleaning or resume the current paused
+  task. Room and zone tasks retain their scope. During cleaning it becomes **Pause**.
 - **Map → Go** sends an idle robot to the selected floor location.
 - **Controls** opens the directional pad. Hold a direction to move; release to stop.
 - **Stop movement** stops manual driving, navigation started here, or a return to dock.
@@ -29,7 +29,11 @@ Opening the map or returning to the app does not start video automatically.
 - **Expand** fills the screen. Turn the phone horizontally for the inset map and
   overlaid controls. Tap the inset map to expand it for Pin-and-Go, then close it to
   return to video. Controls fade after five seconds without interaction; tap video
-  to show them again. Robot status, battery and the map remain visible.
+  to show them again. Robot status, battery, the map and **Exit** remain visible.
+  **Exit** leaves fullscreen without ending the video session in either orientation.
+  Landscape video fills the screen by default. Choose **Fit** in video settings to
+  show the whole camera frame with black margins, or **Fill** to cover the display
+  while trimming edges. Portrait video always fits the whole frame.
 - **End video** closes the viewer. A cleaning task already running when you opened
   video continues. If you started cleaning or movement here, the exit prompt also
   offers to return to dock; you can choose to end video and keep cleaning.
@@ -39,10 +43,28 @@ connects, including while docked. Leaving video stops a held drive and Go naviga
 started here; a requested return to dock continues.
 
 Tap **HD/SD** to change the requested quality. Video settings also show the received
-frame dimensions when available. If HD cannot connect, choose **Retry in SD**.
-Microphone calls and call volume are unavailable. **Activate Remote Viewing** and **Deactivate Remote Viewing** are
-visible but disabled and send no commands. Stopping a viewer does not deactivate
-remote viewing. LocalRock does not reset the PIN or take over another viewer.
+frame dimensions when available, updating while the settings dialog is open.
+The quality label confirms a request; received dimensions describe the actual stream.
+If HD cannot connect, choose **Retry in SD**.
+## Voice calls on iPhone
+
+Audio is off when video starts. Tap **Start call** after video connects to hear the
+robot and speak through its speaker. Allow microphone access if iOS asks. The call
+uses the existing video connection; audio is not saved. Tap **End call** to stop
+audio while keeping video open.
+
+Video settings have independent **Microphone** and **Robot audio** switches. Use
+your phone's volume buttons for incoming sound. The **Robot speaker volume** presets
+change the volume heard at the robot only when selected; starting a call does not
+change that volume. Exiting or backgrounding video ends the call. An interruption
+mutes the microphone; unmute it explicitly to resume speaking.
+
+Voice calls are experimental and require device validation. They are currently
+available in the iPhone build; Android call controls remain unavailable.
+
+**Activate Remote Viewing** and **Deactivate Remote Viewing** remain disabled and
+send no commands. Stopping a viewer does not deactivate remote viewing. LocalRock
+does not reset the PIN or take over another viewer.
 
 ## Connection and retry
 
@@ -64,3 +86,4 @@ The **Connection tests (SD)** section keeps these diagnostic choices available:
 
 All choices request SD and create no phone microphone or camera capture source.
 Stop the current viewer before selecting another choice.
+

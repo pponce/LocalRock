@@ -16,6 +16,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.kodraliu.localrock.shared.vacuum.VacuumStateCodes
 import com.kodraliu.localrock.shared.vacuum.camera.CameraCleaningAction
 import com.kodraliu.localrock.shared.vacuum.camera.CameraMotionController
 import com.kodraliu.localrock.shared.vacuum.camera.cameraCleaningAction
@@ -33,6 +34,7 @@ internal fun CameraCleaningButton(viewModel: VacuumViewModel, motion: CameraMoti
         catch (e: CancellationException) { throw e }
         catch (_: Exception) { /* The next action still requires a fresh status read. */ }
     }
+    if (status.state in setOf(VacuumStateCodes.CHARGING, VacuumStateCodes.CHARGING_COMPLETE)) return
     if (compact) {
         FilledTonalIconButton(onClick={action?.let(motion::cleaning)},enabled=!busy && action!=null,modifier=modifier.size(56.dp)) {
             Icon(if(action==CameraCleaningAction.PAUSE) Icons.Default.Pause else Icons.Default.PlayArrow,action?.label ?: "Cleaning unavailable")
@@ -45,3 +47,4 @@ internal fun CameraCleaningButton(viewModel: VacuumViewModel, motion: CameraMoti
         Text(action?.label ?: "Cleaning unavailable")
     }
 }
+

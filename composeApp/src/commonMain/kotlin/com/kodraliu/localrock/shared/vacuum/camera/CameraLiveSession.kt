@@ -66,6 +66,8 @@ class CameraLiveSession internal constructor(
     private var activeAttempt: Attempt? = null
     private var attemptJob: Job? = null
     private var disposed = false
+    val voice = CameraVoiceCall(rpc, scope, { activeAttempt?.peer }, { activeAttempt?.id },
+        { !disposed && _state.value == State.Streaming })
 
     private class Attempt(val id: String, val test: CameraVideoTest, val quality: CameraVideoQuality) {
         var previewRequested = false
@@ -104,6 +106,7 @@ class CameraLiveSession internal constructor(
             } finally {
                 _state.value = State.Stopping
                 qualityJob?.cancel()
+                withContext(NonCancellable) { voice.release() }
                 activeAttempt = null
                 _peer.value = null
                 try { attempt.peer?.close() } catch (_: Exception) { /* Continue preview cleanup. */ }
@@ -155,6 +158,7 @@ class CameraLiveSession internal constructor(
     }
 
     fun stop() {
+        voice.stop()
         qualityJob?.cancel()
         if (attemptJob != null) {
             _state.value = State.Stopping
@@ -405,4 +409,5 @@ private fun objectResult(result: JsonElement?): JsonObject? = when (result) {
 private fun obj(key: String, value: String): JsonObject = buildJsonObject { put(key, value) }
 private fun md5Hex(input: String): String = MD5().digest(input.encodeToByteArray())
     .joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
+
 

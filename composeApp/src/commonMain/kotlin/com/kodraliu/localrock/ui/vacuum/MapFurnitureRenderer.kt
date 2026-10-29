@@ -68,7 +68,7 @@ internal fun drawFurnitureSymbol(
     if (shortest <= 0f) return
     // Twice the former detail weight, capped proportionally so small map items retain their fill.
     val detailWidth = (strokeWidth * 2f).coerceAtMost(shortest * .02f)
-    val fill = Paint().apply { color = Color(0xFFA0A0A0); isAntiAlias = true }
+    val fill = Paint().apply { color = Color(0xFFECECEC); isAntiAlias = true }
     val cut = Paint().apply {
         blendMode = androidx.compose.ui.graphics.BlendMode.Clear
         style = PaintingStyle.Stroke; this.strokeWidth = detailWidth; isAntiAlias = true
@@ -241,3 +241,4 @@ internal fun drawFurnitureSymbol(
         canvas.restore()
     }
 }
+

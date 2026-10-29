@@ -28,10 +28,17 @@ interface RtcPeer {
     suspend fun setRemoteAnswer(sdp: String)
     suspend fun addRemoteCandidate(candidate: RtcIceCandidate)
     suspend fun diagnostics(): RtcDiagnostics
+    val supportsVoiceCall: Boolean get() = false
+    suspend fun requestMicrophonePermission(): Boolean = false
+    suspend fun startVoiceCall() { error("Voice calls are unavailable on this platform") }
+    fun setMicrophoneMuted(muted: Boolean) {}
+    fun setRemoteAudioMuted(muted: Boolean) {}
+    fun stopVoiceCall() {}
     fun close()
 }
 
 expect val liveViewSupported: Boolean
 
 expect fun createRtcPeer(iceServers: List<RtcIceServer>): RtcPeer
+
 
