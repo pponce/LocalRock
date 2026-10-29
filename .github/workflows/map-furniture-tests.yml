@@ -3,6 +3,9 @@ on:
   push:
     branches: [furniture-display, check/map-furniture, map-appearance-layers, check/map-appearance]
   workflow_dispatch:
+concurrency:
+  group: map-validation-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
   checks: write
@@ -85,6 +88,7 @@ jobs:
           p.write_text(p.read_text().replace('../../CocoaMQTT-master', '../local-work/dependencies/CocoaMQTT'))
           PY
       - name: Compile shared iOS code and archive unsigned Release app
+        timeout-minutes: 50
         run: |
           set -o pipefail
           ./gradlew :composeApp:compileKotlinIosArm64 :composeApp:compileKotlinIosSimulatorArm64 --stacktrace 2>&1 | tee build.log
