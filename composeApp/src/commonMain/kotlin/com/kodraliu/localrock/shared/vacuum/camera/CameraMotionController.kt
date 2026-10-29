@@ -76,6 +76,17 @@ class CameraMotionController internal constructor(
     /** Called on pointer-up, cancellation, mode changes and video disconnection. */
     fun release() { if (holding) job?.cancel() }
 
+    /** Shares the manual-control queue, but does not require video while leaving the dock. */
+    fun cleaning(action: CameraCleaningAction) = launchOperation {
+        val status = readStatus()
+        val method = cameraCleaningCommand(action,
+            status["state"]?.jsonPrimitive?.intOrNull,
+            status["in_cleaning"]?.jsonPrimitive?.intOrNull,
+            status["error_code"]?.jsonPrimitive?.intOrNull)
+            ?: error("The robot's cleaning state changed")
+        ack(method)
+    }
+
     fun goTo(x: Int, y: Int, floor: Int) = launchOperation {
         requireReady()
         require(x in 0..51_200 && y in 0..51_200)

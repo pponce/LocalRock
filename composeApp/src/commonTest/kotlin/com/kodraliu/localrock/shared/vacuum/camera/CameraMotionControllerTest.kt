@@ -36,6 +36,49 @@ class CameraMotionControllerTest {
     private fun TestScope.controller(rpc: Rpc, ready: () -> Boolean = {true}) =
         CameraMotionController(rpc,ready,CoroutineScope(SupervisorJob()+StandardTestDispatcher(testScheduler)))
 
+    @Test fun dockedPlayStartsCleaningBeforeVideoConnects() = runTest {
+        val rpc=Rpc().apply {state=8};val c=controller(rpc){false}
+        c.cleaning(CameraCleaningAction.START);advanceUntilIdle()
+        assertEquals(listOf("get_status","app_start"),rpc.methods())
+        c.dispose();advanceUntilIdle()
+        assertFalse("app_stop" in rpc.methods())
+    }
+    @Test fun cleaningCommandsPreserveTheCurrentTask() = runTest {
+        for ((scope,method) in mapOf(1 to "app_start",2 to "resume_zoned_clean",3 to "resume_segment_clean")) {
+            val rpc=Rpc().apply {state=10;cleaning=scope};val c=controller(rpc)
+            c.cleaning(CameraCleaningAction.RESUME);advanceUntilIdle()
+            assertEquals(listOf("get_status",method),rpc.methods())
+            c.dispose();advanceUntilIdle()
+        }
+    }
+    @Test fun runningTaskCanBePaused() = runTest {
+        val rpc=Rpc().apply {state=5;cleaning=1};val c=controller(rpc)
+        c.cleaning(CameraCleaningAction.PAUSE);advanceUntilIdle()
+        assertEquals(listOf("get_status","app_pause"),rpc.methods())
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun stalePlayDoesNotPauseARunThatStartedElsewhere() = runTest {
+        val rpc=Rpc().apply {state=5;cleaning=1};val c=controller(rpc)
+        c.cleaning(CameraCleaningAction.START);advanceUntilIdle()
+        assertEquals(listOf("get_status"),rpc.methods());assertNotNull(c.error.value)
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun repeatedPlayAndDriveShareOneCommandQueue() = runTest {
+        val rpc=Rpc().apply {state=8;statusDelay=500};val c=controller(rpc)
+        c.cleaning(CameraCleaningAction.START)
+        c.cleaning(CameraCleaningAction.START)
+        c.hold(CameraMotionController.Direction.FORWARD)
+        advanceUntilIdle()
+        assertEquals(listOf("get_status","app_start"),rpc.methods())
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun refusedCleaningCommandIsReportedWithoutRetries() = runTest {
+        val rpc=Rpc().apply {refuse="app_start"};val c=controller(rpc)
+        c.cleaning(CameraCleaningAction.START);advanceUntilIdle()
+        assertEquals(listOf("get_status","app_start"),rpc.methods());assertNotNull(c.error.value)
+        c.dispose();advanceUntilIdle()
+    }
+
     @Test fun release_sends_zero_then_end_and_stops_repeating() = runTest {
         val rpc=Rpc();val c=controller(rpc)
         c.hold(CameraMotionController.Direction.FORWARD);runCurrent();advanceTimeBy(450);runCurrent()

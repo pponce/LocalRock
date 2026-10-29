@@ -138,3 +138,8 @@ not available in this controls preview. Activate and Deactivate Remote Viewing a
 shown disabled and send no commands. Activate remote viewing in the official Roborock
 app while connected to Roborock's servers, before switching to the local server.
 Stopping a viewing session does not deactivate the robot's remote-viewing feature.
+
+The Play button starts cleaning when idle or docked. When a cleaning task is paused,
+it resumes that task, including room and zone cleaning. During cleaning the button
+becomes Pause. Cleaning controls are also available before video connects, because
+S7 MaxV video is unavailable on the dock. Stopping video does not stop a cleaning task.

@@ -78,7 +78,7 @@ internal fun CameraVideoControls(
             Box(modifier.background(Color.Black)) {
                 key(peer) { RtcVideoView(peer, Modifier.fillMaxSize()) }
                 if (status.state in setOf(VacuumStateCodes.CHARGING, VacuumStateCodes.CHARGING_COMPLETE)) {
-                    Text("Robot docked. Move it to view the area.", Modifier.align(Alignment.Center).padding(20.dp), color = Color.White)
+                    Text("Video is unavailable while docked. Play starts cleaning to move the robot off the dock.", Modifier.align(Alignment.Center).padding(20.dp), color = Color.White)
                 } else if (state is CameraLiveSession.State.Connecting) {
                     Text(state.stage, Modifier.align(Alignment.Center).background(Color.Black.copy(alpha=.65f)).padding(12.dp), color=Color.White)
                 }
@@ -89,6 +89,7 @@ internal fun CameraVideoControls(
                 Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp), verticalAlignment=Alignment.CenterVertically) {
                     Text("SD",color=Color.White,modifier=Modifier.background(Color.Black.copy(alpha=.65f)).padding(8.dp))
                     Spacer(Modifier.weight(1f))
+                    CameraCleaningButton(viewModel, motion)
                     IconButton(onClick={ motion.release();onExpand(!expanded) }) {
                         Icon(if(expanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                             if(expanded) "Exit full screen" else "Expand video",tint=Color.White)

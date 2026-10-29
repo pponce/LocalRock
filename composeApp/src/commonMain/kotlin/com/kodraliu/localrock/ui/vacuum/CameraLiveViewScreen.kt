@@ -47,6 +47,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     LaunchedEffect(ready) { if (!ready) motion.stop(includeDock = false) }
     LaunchedEffect(viewing) { if (!viewing) expanded = false }
     val diagnostics by live.diagnostics.collectAsState()
+    val motionError by motion.error.collectAsState()
     val cleanupWarning by live.cleanupWarning.collectAsState()
     // Existing credentials are kept only for this screen's foreground lifetime.
     var pin by remember(viewModel) { mutableStateOf("") }
@@ -113,6 +114,9 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(viewModel.deviceName, style = MaterialTheme.typography.titleMedium)
+                    Text("Video is unavailable while docked. Play starts cleaning and moves the robot off the dock.", textAlign = TextAlign.Center)
+                    CameraCleaningButton(viewModel, motion)
+                    motionError?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
                     Text("Enter your existing camera PIN or pattern. Activate remote viewing in the official Roborock app before switching to the local server.",
                         textAlign = TextAlign.Center)
                     if (typed) {
@@ -161,6 +165,8 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(s.message, textAlign = TextAlign.Center)
+                    CameraCleaningButton(viewModel, motion)
+                    motionError?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
                     cleanupWarning?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
                     Button(onClick = { start() }, enabled = pin.isNotBlank()) { Text("Retry Video ${selectedTest.code}") }
                     TextButton(onClick = { live.stop() }) { Text("Choose another video test", color = Color.White) }
