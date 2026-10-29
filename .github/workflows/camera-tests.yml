@@ -35,6 +35,9 @@ jobs:
                   if not (headers / item.name).exists():
                       shutil.copyfile(item, headers / item.name)
               print('Restored matching M149 API headers for the macOS offer check.')
+          # The absent macOS-only view header is outside this headless peer test.
+          umbrella = headers / 'WebRTC.h'
+          umbrella.write_text(umbrella.read_text().replace('#import <WebRTC/RTCMTLNSVideoView.h>', ''))
           PY
             swift run --package-path local-work/rtc-offer-check
           } 2>&1 | tee offer-check.log
