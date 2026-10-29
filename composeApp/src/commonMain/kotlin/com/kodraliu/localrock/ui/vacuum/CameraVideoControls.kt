@@ -84,16 +84,27 @@ internal fun CameraVideoControls(
     val headline = if (status.state == VacuumStateCodes.CHARGING_COMPLETE) "Charged"
         else status.state?.let { VacuumStateCodes.describe(it) } ?: "Robot status unavailable"
     fun interact() { controlsVisible = true; interaction++ }
+    val callLabel = if (callBusy) "Cancel call" else if (callActive) "End call" else "Start call"
+    val callEnabled = callActive || callBusy || (ready && callsSupported)
+    val toggleCall: () -> Unit = {
+        motion.release()
+        if (callActive || callBusy) voice.stop() else voice.start()
+    }
     val callButton: @Composable (Modifier) -> Unit = { modifier ->
-        FilledTonalButton(onClick={
-            motion.release()
-            if (callActive || callBusy) voice.stop() else voice.start()
-        },enabled=callActive || callBusy || (ready && callsSupported),modifier=modifier,
+        FilledTonalButton(onClick=toggleCall,enabled=callEnabled,modifier=modifier,
             colors=ButtonDefaults.filledTonalButtonColors(
                 containerColor=if(callActive) Color(0xff168658) else Color(0xff303030),contentColor=Color.White)) {
             Icon(if(callActive || callBusy) Icons.Default.CallEnd else Icons.Default.Mic,null)
             Spacer(Modifier.width(6.dp))
-            Text(if(callBusy) "Cancel call" else if(callActive) "End call" else "Start call")
+            Text(callLabel)
+        }
+    }
+    val callIconButton: @Composable (Modifier) -> Unit = { modifier ->
+        FilledTonalIconButton(onClick=toggleCall,enabled=callEnabled,modifier=modifier.size(56.dp),
+            colors=IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor=if(callActive || callBusy) Color(0xffb3261e) else Color(0xff168658),
+                contentColor=Color.White)) {
+            Icon(if(callActive || callBusy) Icons.Default.CallEnd else Icons.Default.Mic,callLabel)
         }
     }
     LaunchedEffect(expanded, interaction, busy, mapExpanded, settings) {
@@ -195,7 +206,7 @@ internal fun CameraVideoControls(
                 }
             }
             if (!expanded) CameraCleaningButton(viewModel,motion,modifier=Modifier.align(Alignment.BottomEnd).padding(8.dp))
-            if (!expanded) callButton(Modifier.align(Alignment.BottomStart).padding(8.dp))
+            if (!expanded) callIconButton(Modifier.align(Alignment.BottomStart).padding(8.dp))
         }
         if (wide) {
             if (mapExpanded) {
@@ -214,11 +225,15 @@ internal fun CameraVideoControls(
                     Modifier.align(Alignment.BottomStart).windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Bottom + WindowInsetsSides.Start))
                         .padding(16.dp).size((maxHeight*.48f).coerceAtMost(220.dp)))
             }
-            if (controlsVisible) Column(Modifier.align(Alignment.BottomEnd)
+            // Keep call controls in the right rail, outside the expanded map and its Go button.
+            Column(Modifier.align(Alignment.BottomEnd)
                 .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Bottom + WindowInsetsSides.End))
                 .padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-                CameraCleaningButton(viewModel,motion,compact=true)
-                FilledTonalIconButton(onClick=onDock,enabled=enabled,modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Home,"Return to dock and end video") }
+                if (controlsVisible) {
+                    CameraCleaningButton(viewModel,motion,compact=true)
+                    FilledTonalIconButton(onClick=onDock,enabled=enabled,modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Home,"Return to dock and end video") }
+                }
+                callIconButton(Modifier)
             }
         } else if (expanded) {
             if (controlsVisible) Text("Turn your phone sideways for full-screen controls.",
@@ -245,8 +260,8 @@ internal fun CameraVideoControls(
                 }
             }
         }
-        if (expanded) {
-            callButton(Modifier.align(Alignment.BottomCenter)
+        if (expanded && !wide) {
+            callIconButton(Modifier.align(Alignment.BottomCenter)
                 .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                 .padding(bottom=12.dp))
         }

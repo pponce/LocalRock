@@ -20,8 +20,9 @@ Opening the map or returning to the app does not start video automatically.
 
 ## Video and cleaning controls
 
-- **Play** is available off the dock to start cleaning or resume the current paused
-  task. Room and zone tasks retain their scope. During cleaning it becomes **Pause**.
+- **Pause** and **Resume** control an existing cleaning task while off the dock.
+  Room and zone tasks retain their scope. The viewer does not offer Start cleaning;
+  use **Map → Go** to move an idle or docked robot.
 - **Map → Go** sends an idle robot to the selected floor location.
 - **Controls** opens the directional pad. Hold a direction to move; release to stop.
 - **Stop movement** stops manual driving, navigation started here, or a return to dock.
@@ -29,14 +30,15 @@ Opening the map or returning to the app does not start video automatically.
 - **Expand** fills the screen. Turn the phone horizontally for the inset map and
   overlaid controls. Tap the inset map to expand it for Pin-and-Go, then close it to
   return to video. Controls fade after five seconds without interaction; tap video
-  to show them again. Robot status, battery, the map and **Exit** remain visible.
+  to show them again. Robot status, battery, the map, call icon and **Exit** remain visible.
+  The call icon stays beside the right-side controls, clear of the expanded map's **Go** button.
   **Exit** leaves fullscreen without ending the video session in either orientation.
   Landscape video fills the screen by default. Choose **Fit** in video settings to
   show the whole camera frame with black margins, or **Fill** to cover the display
   while trimming edges. Portrait video always fits the whole frame.
 - **End video** closes the viewer. A cleaning task already running when you opened
-  video continues. If you started cleaning or movement here, the exit prompt also
-  offers to return to dock; you can choose to end video and keep cleaning.
+  video continues. If you started movement here, the exit prompt also offers to
+  return to dock; ending video alone stops viewer-owned movement.
 
 Manual driving requires a connected viewer and an idle robot. Go works before video
 connects, including while docked. Leaving video stops a held drive and Go navigation
@@ -48,10 +50,11 @@ The quality label confirms a request; received dimensions describe the actual st
 If HD cannot connect, choose **Retry in SD**.
 ## Voice calls on iPhone
 
-Audio is off when video starts. Tap **Start call** after video connects to hear the
+Audio is off when video starts. Tap the **green microphone icon** after video connects to hear the
 robot and speak through its speaker. Allow microphone access if iOS asks. The call
-uses the existing video connection; audio is not saved. Tap **End call** to stop
-audio while keeping video open.
+uses the existing video connection; audio is not saved. The icon becomes a red
+hang-up button during a call; tap it to stop audio while keeping video open.
+The same Start/End call actions are also available as labeled buttons in video settings.
 
 Video settings have independent **Microphone** and **Robot audio** switches. Use
 your phone's volume buttons for incoming sound. The **Robot speaker volume** presets

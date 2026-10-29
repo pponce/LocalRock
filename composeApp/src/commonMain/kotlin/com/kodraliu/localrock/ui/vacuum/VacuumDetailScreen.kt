@@ -978,23 +978,6 @@ internal fun VacuumMapImage(
             if (layers.detectedObstacles) drawObstacles(map, content, mapViewport.offset, mapViewport.scale)
         }
 
-        // Zoom is reported relative to the framed view, which is now the resting state.
-        val baseScale = fit?.first ?: 1f
-        val relativeZoom = if (baseScale > 0f) mapViewport.scale / baseScale else mapViewport.scale
-        if (relativeZoom > 1.05f) {
-            Surface(
-                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                shape = MaterialTheme.shapes.small,
-            ) {
-                Text(
-                    "${(relativeZoom * 100).toInt()}%",
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                )
-            }
-        }
     }
 }
 

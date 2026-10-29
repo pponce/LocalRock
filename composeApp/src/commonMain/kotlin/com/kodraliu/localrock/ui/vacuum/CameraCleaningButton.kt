@@ -35,6 +35,8 @@ internal fun CameraCleaningButton(viewModel: VacuumViewModel, motion: CameraMoti
         catch (_: Exception) { /* The next action still requires a fresh status read. */ }
     }
     if (status.state in setOf(VacuumStateCodes.CHARGING, VacuumStateCodes.CHARGING_COMPLETE)) return
+    // The viewer can pause/resume an existing clean, but never offers a new cleaning run.
+    if (action == null || action == CameraCleaningAction.START) return
     if (compact) {
         FilledTonalIconButton(onClick={action?.let(motion::cleaning)},enabled=!busy && action!=null,modifier=modifier.size(56.dp)) {
             Icon(if(action==CameraCleaningAction.PAUSE) Icons.Default.Pause else Icons.Default.PlayArrow,action?.label ?: "Cleaning unavailable")

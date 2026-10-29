@@ -145,6 +145,33 @@ class CameraMotionControllerTest {
         assertEquals("app_rc_end",rpc.methods().last());assertNotNull(c.error.value)
         c.dispose();advanceUntilIdle()
     }
+    @Test fun explicit_retry_after_refused_start_can_drive_and_release() = runTest {
+        val rpc=Rpc().apply {refuse="app_rc_start"};val c=controller(rpc)
+        c.hold(CameraMotionController.Direction.FORWARD);advanceUntilIdle()
+        assertNotNull(c.error.value);assertFalse(c.busy.value);assertFalse(c.manualMode.value)
+        assertFalse("app_rc_move" in rpc.methods())
+        rpc.refuse=null
+        c.hold(CameraMotionController.Direction.FORWARD);runCurrent();advanceTimeBy(250);runCurrent()
+        c.release();advanceUntilIdle()
+        assertNull(c.error.value);assertFalse(c.busy.value)
+        assertEquals(2,rpc.methods().count {it=="app_rc_start"})
+        assertTrue("app_rc_move" in rpc.methods());assertEquals("app_rc_stop",rpc.methods().last())
+        c.dispose();advanceUntilIdle()
+    }
+    @Test fun explicit_retry_after_manual_entry_timeout_uses_a_fresh_session() = runTest {
+        val rpc=Rpc().apply {enterManualMode=false};val c=controller(rpc)
+        c.hold(CameraMotionController.Direction.LEFT);advanceUntilIdle()
+        assertNotNull(c.error.value);assertFalse(c.busy.value);assertFalse(c.manualMode.value)
+        assertEquals("app_rc_end",rpc.methods().last());assertFalse("app_rc_move" in rpc.methods())
+        rpc.enterManualMode=true
+        c.hold(CameraMotionController.Direction.RIGHT);runCurrent();advanceTimeBy(250);runCurrent()
+        c.release();advanceUntilIdle()
+        assertNull(c.error.value);assertFalse(c.busy.value)
+        val firstMove=rpc.calls.first {it.first=="app_rc_move"}.second.jsonArray.single().jsonObject
+        assertEquals(1,firstMove["seqnum"]!!.jsonPrimitive.int)
+        assertEquals("app_rc_stop",rpc.methods().last())
+        c.dispose();advanceUntilIdle()
+    }
     @Test fun goto_uses_bare_coordinates_and_stop_releases_owned_navigation() = runTest {
         val rpc=Rpc();val c=controller(rpc)
         c.goTo(24500,26000,0);advanceUntilIdle()
