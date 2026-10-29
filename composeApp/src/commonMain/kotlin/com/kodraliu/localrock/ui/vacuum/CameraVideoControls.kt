@@ -2,6 +2,8 @@ package com.kodraliu.localrock.ui.vacuum
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -27,6 +29,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -35,6 +38,7 @@ import com.kodraliu.localrock.shared.vacuum.VacuumStateCodes
 import com.kodraliu.localrock.shared.vacuum.camera.CameraLiveSession
 import com.kodraliu.localrock.shared.vacuum.camera.CameraVideoQuality
 import com.kodraliu.localrock.shared.vacuum.camera.CameraMotionController
+import com.kodraliu.localrock.shared.vacuum.camera.CameraVoiceCall
 import com.kodraliu.localrock.shared.vacuum.map.MapFormat
 import com.kodraliu.localrock.shared.vacuum.map.ParsedMap
 import com.kodraliu.localrock.shared.webrtc.RtcPeer
@@ -49,6 +53,7 @@ import kotlinx.coroutines.launch
 internal fun CameraVideoControls(
     viewModel: VacuumViewModel, peer: RtcPeer?, motion: CameraMotionController,
     state: CameraLiveSession.State, ready: Boolean, expanded: Boolean,
+    voice: CameraVoiceCall,
     onExpand: (Boolean) -> Unit, onStopVideo: () -> Unit, onDock: () -> Unit,
     onRetry: () -> Unit, quality: CameraVideoQuality, qualityEnabled: Boolean, qualityError: String?,
     diagnostics: RtcDiagnostics, onQuality: (CameraVideoQuality) -> Unit, onRetrySd: () -> Unit,
@@ -58,8 +63,17 @@ internal fun CameraVideoControls(
     val floor by viewModel.repository.currentFloorFlag.collectAsState()
     val busy by motion.busy.collectAsState()
     val error by motion.error.collectAsState()
+    val callActive by voice.active.collectAsState()
+    val callBusy by voice.busy.collectAsState()
+    val callError by voice.error.collectAsState()
+    val microphoneMuted by voice.microphoneMuted.collectAsState()
+    val remoteAudioMuted by voice.remoteAudioMuted.collectAsState()
+    val speakerVolume by voice.speakerVolume.collectAsState()
+    val volumeBusy by voice.volumeBusy.collectAsState()
+    val callsSupported = peer?.supportsVoiceCall == true
     var steering by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
+    var fillVideo by remember { mutableStateOf(true) }
     var mapExpanded by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var interaction by remember { mutableStateOf(0) }
@@ -70,6 +84,18 @@ internal fun CameraVideoControls(
     val headline = if (status.state == VacuumStateCodes.CHARGING_COMPLETE) "Charged"
         else status.state?.let { VacuumStateCodes.describe(it) } ?: "Robot status unavailable"
     fun interact() { controlsVisible = true; interaction++ }
+    val callButton: @Composable (Modifier) -> Unit = { modifier ->
+        FilledTonalButton(onClick={
+            motion.release()
+            if (callActive || callBusy) voice.stop() else voice.start()
+        },enabled=callActive || callBusy || (ready && callsSupported),modifier=modifier,
+            colors=ButtonDefaults.filledTonalButtonColors(
+                containerColor=if(callActive) Color(0xff168658) else Color(0xff303030),contentColor=Color.White)) {
+            Icon(if(callActive || callBusy) Icons.Default.CallEnd else Icons.Default.Mic,null)
+            Spacer(Modifier.width(6.dp))
+            Text(if(callBusy) "Cancel call" else if(callActive) "End call" else "Start call")
+        }
+    }
     LaunchedEffect(expanded, interaction, busy, mapExpanded, settings) {
         controlsVisible = true
         if (expanded && !busy && !mapExpanded && !settings) {
@@ -126,13 +152,14 @@ internal fun CameraVideoControls(
     }) {
         val landscape = maxWidth > maxHeight
         val wide = expanded && landscape
+        val overlayInsets = if (expanded) WindowInsets.safeDrawing else WindowInsets(0, 0, 0, 0)
         val portraitVideoHeight = maxHeight * .43f
         val videoModifier = if (expanded) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(portraitVideoHeight)
         // Keep one native renderer composition site through expansion, rotation and map changes.
-        Box(videoModifier.background(Color.Black)) {
-            peer?.let { currentPeer -> key(currentPeer) { RtcVideoView(currentPeer,Modifier.fillMaxSize()) } }
+        Box(videoModifier.background(Color.Black).clipToBounds()) {
+            peer?.let { currentPeer -> key(currentPeer) { RtcVideoView(currentPeer,Modifier.fillMaxSize(),fill=wide && fillVideo) } }
             if (docked) {
-                Text("Robot docked. Use Pin-and-Go or Play to move it and view the area.",
+                Text("Robot docked. Choose a spot on the map and tap Go to move it and start video.",
                     Modifier.align(Alignment.Center).padding(horizontal=32.dp,vertical=72.dp),
                     color=Color.White,textAlign=TextAlign.Center)
             } else when (val current=state) {
@@ -145,23 +172,38 @@ internal fun CameraVideoControls(
                 }
                 else -> Unit
             }
-            Text(headline,Modifier.align(Alignment.TopCenter).padding(top=12.dp).background(Color.Black.copy(alpha=.35f)).padding(horizontal=8.dp),color=Color.White)
-            Text(status.battery?.let {"$it%"} ?: "—%",Modifier.align(Alignment.TopStart).padding(12.dp),color=Color.White)
-            if (controlsVisible || !expanded) Row(Modifier.align(Alignment.TopEnd).padding(4.dp),verticalAlignment=Alignment.CenterVertically) {
-                TextButton(onClick={motion.release();settings=true}) { Text(quality.name,color=Color.White) }
-                IconButton(onClick={motion.release();onExpand(!expanded)}) {
-                    Icon(if(expanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                        if(expanded) "Exit full screen" else "Expand video",tint=Color.White)
+            Row(Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .background(Color.Black.copy(alpha=.55f)).padding(horizontal=4.dp),verticalAlignment=Alignment.CenterVertically) {
+                Text(status.battery?.let {"$it%"} ?: "—%",Modifier.padding(horizontal=8.dp),color=Color.White)
+                Text(headline,Modifier.weight(1f),color=Color.White,textAlign=TextAlign.Center,maxLines=1,overflow=TextOverflow.Ellipsis)
+                if (controlsVisible || !expanded) {
+                    TextButton(onClick={motion.release();settings=true}) { Text(quality.name,color=Color.White) }
                 }
-                IconButton(onClick={motion.release();settings=true}) { Icon(Icons.Default.MoreVert,"Video settings",tint=Color.White) }
+                // Keep the exit reachable even after the driving overlays fade.
+                if (expanded) {
+                    TextButton(onClick={motion.release();onExpand(false)}) {
+                        Icon(Icons.Default.FullscreenExit,null,tint=Color.White)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Exit",color=Color.White)
+                    }
+                } else IconButton(onClick={motion.release();onExpand(true)}) {
+                    Icon(Icons.Default.Fullscreen,"Expand video",tint=Color.White)
+                }
+                if (controlsVisible || !expanded) {
+                    IconButton(onClick={motion.release();settings=true}) { Icon(Icons.Default.MoreVert,"Video settings",tint=Color.White) }
+                }
             }
             if (!expanded) CameraCleaningButton(viewModel,motion,modifier=Modifier.align(Alignment.BottomEnd).padding(8.dp))
+            if (!expanded) callButton(Modifier.align(Alignment.BottomStart).padding(8.dp))
         }
         if (wide) {
             if (mapExpanded) {
-                targetPanel(Modifier.align(Alignment.CenterStart).fillMaxHeight().fillMaxWidth(.6f),true)
+                targetPanel(Modifier.align(Alignment.CenterStart).fillMaxHeight().fillMaxWidth(.6f)
+                    .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)).padding(top=48.dp),true)
             } else {
-                Box(Modifier.align(Alignment.TopStart).padding(top=48.dp,start=12.dp)
+                Box(Modifier.align(Alignment.TopStart).windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Start))
+                    .padding(top=56.dp,start=12.dp)
                     .size((maxHeight * .30f).coerceAtMost(150.dp))) {
                     map?.let {pm->CameraTargetMap(pm,floor,null,false,{},Modifier.fillMaxSize())}
                     // The overlay owns the tap; the thumbnail itself must not pan behind it.
@@ -169,19 +211,19 @@ internal fun CameraVideoControls(
                         .pointerInput(Unit) {detectTapGestures(onTap={motion.release();mapExpanded=true})})
                 }
                 if (controlsVisible) CameraDrivePad(motion,ready,
-                    Modifier.align(Alignment.BottomStart).padding(16.dp).size((maxHeight*.48f).coerceAtMost(220.dp)))
+                    Modifier.align(Alignment.BottomStart).windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Bottom + WindowInsetsSides.Start))
+                        .padding(16.dp).size((maxHeight*.48f).coerceAtMost(220.dp)))
             }
-            if (controlsVisible) Column(Modifier.align(Alignment.BottomEnd).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+            if (controlsVisible) Column(Modifier.align(Alignment.BottomEnd)
+                .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Bottom + WindowInsetsSides.End))
+                .padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
                 CameraCleaningButton(viewModel,motion,compact=true)
                 FilledTonalIconButton(onClick=onDock,enabled=enabled,modifier=Modifier.size(56.dp)) { Icon(Icons.Default.Home,"Return to dock and end video") }
             }
-            // Calls stay unavailable until their complete protocol and native audio path are validated.
-            TextButton(onClick={motion.release();settings=true},modifier=Modifier.align(Alignment.BottomCenter).padding(bottom=16.dp)) {
-                Icon(Icons.Default.MicOff,"Microphone unavailable",tint=Color.LightGray)
-            }
         } else if (expanded) {
             if (controlsVisible) Text("Turn your phone sideways for full-screen controls.",
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha=.6f)).padding(16.dp),color=Color.White)
+                Modifier.align(Alignment.BottomCenter).windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Bottom))
+                    .padding(bottom=64.dp).fillMaxWidth().background(Color.Black.copy(alpha=.6f)).padding(16.dp),color=Color.White)
         } else {
             Column(Modifier.fillMaxSize()) {
                 Spacer(Modifier.height(portraitVideoHeight))
@@ -203,11 +245,18 @@ internal fun CameraVideoControls(
                 }
             }
         }
-        error?.let {Text(it,Modifier.align(Alignment.TopCenter).padding(top=44.dp).background(Color(0xff5b2424)).padding(8.dp),color=Color.White)}
+        if (expanded) {
+            callButton(Modifier.align(Alignment.BottomCenter)
+                .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                .padding(bottom=12.dp))
+        }
+        (error ?: callError)?.let {Text(it,Modifier.align(Alignment.TopCenter)
+            .windowInsetsPadding(overlayInsets.only(WindowInsetsSides.Top)).padding(top=52.dp)
+            .background(Color(0xff5b2424)).padding(8.dp),color=Color.White)}
     }
     if(settings) AlertDialog(
         onDismissRequest={settings=false},title={Text("Remote viewing")},
-        text={Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Requested video quality")
             Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 CameraVideoQuality.entries.forEach {value->
@@ -217,7 +266,32 @@ internal fun CameraVideoControls(
             if(diagnostics.videoWidth>0 && diagnostics.videoHeight>0)
                 Text("Received video: ${diagnostics.videoWidth} × ${diagnostics.videoHeight}")
             qualityError?.let {Text(it,color=MaterialTheme.colorScheme.error)}
-            Text("Call volume and microphone calls are not available in this build.")
+            Text("Landscape video framing")
+            Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                FilterChip(selected=!fillVideo,onClick={fillVideo=false},label={Text("Fit")})
+                FilterChip(selected=fillVideo,onClick={fillVideo=true},label={Text("Fill")})
+            }
+            Text("Fit shows the whole camera frame. Fill trims edges to cover the screen.")
+            if (callsSupported) {
+                callButton(Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Text("Microphone",Modifier.weight(1f))
+                    Switch(checked=callActive && !microphoneMuted,onCheckedChange={voice.muteMicrophone(!it)},enabled=callActive)
+                }
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Text("Robot audio",Modifier.weight(1f))
+                    Switch(checked=callActive && !remoteAudioMuted,onCheckedChange={voice.muteRemoteAudio(!it)},enabled=callActive)
+                }
+                Text("Robot speaker volume" + (speakerVolume?.let { ": $it%" } ?: ": unchanged"))
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    listOf(25,50,75).forEach {value->
+                        FilterChip(selected=speakerVolume==value,onClick={voice.setSpeakerVolume(value)},
+                            enabled=callActive && !volumeBusy,label={Text("$value%")})
+                    }
+                }
+                Text("Use your phone's volume buttons for the sound you hear. Calls are experimental and audio is not saved.")
+            } else Text("Voice calls are available in the iPhone test build once video connects.")
+            callError?.let {Text(it,color=MaterialTheme.colorScheme.error)}
             Button(onClick={},enabled=false,modifier=Modifier.fillMaxWidth()) {Text("Activate Remote Viewing")}
             Button(onClick={},enabled=false,modifier=Modifier.fillMaxWidth()) {Text("Deactivate Remote Viewing")}
             Text("Activate remote viewing in the official Roborock app while connected to Roborock's servers, before switching to the local server. Activation controls are unavailable in LocalRock.")
@@ -313,3 +387,4 @@ private fun CameraTargetMap(map: ParsedMap,floor:Int,target:Pair<Int,Int>?,enabl
         }
     }
 }
+

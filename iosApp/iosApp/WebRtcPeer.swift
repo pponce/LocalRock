@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import UIKit
 import WebRTC
 import ComposeApp
@@ -9,7 +10,7 @@ import ComposeApp
 // plus the render view.
 //
 // The target's synchronized source folder includes this file. WebRTC is linked via SPM;
-// ContentView injects WebRtcNativeFactory. This viewer never creates a local capture track.
+// ContentView injects WebRtcNativeFactory. A microphone track is attached only for an explicit call.
 
 final class WebRtcNativeFactory: NSObject, RtcNativePeerFactory {
 
@@ -19,6 +20,10 @@ final class WebRtcNativeFactory: NSObject, RtcNativePeerFactory {
         // Native diagnostics may contain SDP/ICE; the app exposes allowlisted stats instead.
         RTCSetMinDebugLogLevel(.none)
         RTCInitializeSSL()
+        // Opening video alone must not initialize the VoIP recording/playback unit.
+        let audioSession = RTCAudioSession.sharedInstance()
+        audioSession.useManualAudio = true
+        audioSession.isAudioEnabled = false
         let encoder = RTCDefaultVideoEncoderFactory()
         let decoder = RTCDefaultVideoDecoderFactory()
         self.factory = RTCPeerConnectionFactory(encoderFactory: encoder, decoderFactory: decoder)
@@ -37,6 +42,15 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
     private let peerConnection: RTCPeerConnection
     private let videoView: RTCMTLVideoView
     private var remoteVideoTrack: RTCVideoTrack?
+    private var remoteAudioTrack: RTCAudioTrack?
+    private var microphoneTrack: RTCAudioTrack?
+    private var microphoneSource: RTCAudioSource?
+    private var microphoneSender: RTCRtpSender?
+    private var voiceActive = false
+    private var remoteAudioMuted = true
+    private var activatedAudioSession = false
+    private var previousAudioCategory: (String, String, AVAudioSession.CategoryOptions)?
+    private static weak var audioOwner: WebRtcPeer?
     // Access renderer state only on the main queue.
     private var rendererClosed = false
 
@@ -64,7 +78,12 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
         self.videoView = WebRtcPeer.onMain { RTCMTLVideoView(frame: .zero) }
         super.init()
         self.peerConnection.delegate = self
-        WebRtcPeer.onMainVoid { self.videoView.videoContentMode = .scaleAspectFit }
+        WebRtcPeer.onMainVoid {
+            self.videoView.videoContentMode = .scaleAspectFit
+            self.videoView.backgroundColor = .black
+            self.videoView.clipsToBounds = true
+            self.videoView.isUserInteractionEnabled = false
+        }
     }
 
     // MARK: RtcNativePeer
@@ -134,6 +153,7 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
 
     func close() {
         WebRtcPeer.onMainVoid {
+            self.stopVoiceCall()
             self.rendererClosed = true
             self.remoteVideoTrack?.remove(self.videoView)
             self.remoteVideoTrack = nil
@@ -143,6 +163,108 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
 
     func renderView() -> UIView? {
         return videoView
+    }
+
+    func setVideoFill(fill: Bool) {
+        WebRtcPeer.onMainVoid {
+            self.videoView.videoContentMode = fill ? .scaleAspectFill : .scaleAspectFit
+        }
+    }
+
+    func requestMicrophonePermission(onGranted: @escaping () -> Void, onDenied: @escaping () -> Void) {
+        WebRtcPeer.onMainVoid {
+            guard !self.rendererClosed else { onDenied(); return }
+            let session = AVAudioSession.sharedInstance()
+            switch session.recordPermission {
+            case .granted: onGranted()
+            case .denied: onDenied()
+            case .undetermined:
+                session.requestRecordPermission { granted in
+                    WebRtcPeer.onMainVoid {
+                        if granted && !self.rendererClosed { onGranted() } else { onDenied() }
+                    }
+                }
+            @unknown default: onDenied()
+            }
+        }
+    }
+
+    func startVoiceCall(onSuccess: @escaping () -> Void, onError: @escaping () -> Void) {
+        WebRtcPeer.onMainVoid {
+            guard !self.rendererClosed,
+                  UIApplication.shared.applicationState == .active,
+                  AVAudioSession.sharedInstance().recordPermission == .granted,
+                  WebRtcPeer.audioOwner == nil || WebRtcPeer.audioOwner === self,
+                  let transceiver = self.peerConnection.transceivers.first(where: { $0.mediaType == .audio }) else {
+                onError(); return
+            }
+            if self.voiceActive { onSuccess(); return }
+            let audio = RTCAudioSession.sharedInstance()
+            self.previousAudioCategory = (audio.session.category.rawValue, audio.session.mode.rawValue, audio.session.categoryOptions)
+            WebRtcPeer.audioOwner = self
+            audio.lockForConfiguration()
+            do {
+                try audio.setCategory(AVAudioSession.Category.playAndRecord.rawValue,
+                    mode: AVAudioSession.Mode.voiceChat.rawValue, options: [.defaultToSpeaker, .allowBluetooth])
+                try audio.setActive(true)
+                self.activatedAudioSession = true
+                audio.unlockForConfiguration()
+            } catch {
+                audio.unlockForConfiguration()
+                self.stopVoiceCall()
+                onError(); return
+            }
+            // Reuse the negotiated audio sender. Do not replace the peer, SDP or video renderer.
+            let source = self.factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
+            let track = self.factory.audioTrack(with: source, trackId: UUID().uuidString.lowercased())
+            track.isEnabled = false
+            self.microphoneSource = source
+            self.microphoneTrack = track
+            self.microphoneSender = transceiver.sender
+            transceiver.sender.track = track
+            self.voiceActive = true
+            self.remoteAudioMuted = false
+            self.remoteAudioTrack?.isEnabled = true
+            audio.isAudioEnabled = true
+            track.isEnabled = true
+            onSuccess()
+        }
+    }
+
+    func setMicrophoneMuted(muted: Bool) {
+        WebRtcPeer.onMainVoid { self.microphoneTrack?.isEnabled = self.voiceActive && !muted }
+    }
+
+    func setRemoteAudioMuted(muted: Bool) {
+        WebRtcPeer.onMainVoid {
+            self.remoteAudioMuted = muted
+            self.remoteAudioTrack?.isEnabled = self.voiceActive && !muted
+        }
+    }
+
+    func stopVoiceCall() {
+        WebRtcPeer.onMainVoid {
+            self.microphoneTrack?.isEnabled = false
+            self.remoteAudioTrack?.isEnabled = false
+            self.microphoneSender?.track = nil
+            self.microphoneSender = nil
+            self.microphoneTrack = nil
+            self.microphoneSource = nil
+            self.voiceActive = false
+            self.remoteAudioMuted = true
+            guard WebRtcPeer.audioOwner === self else { return }
+            let audio = RTCAudioSession.sharedInstance()
+            audio.isAudioEnabled = false
+            audio.lockForConfiguration()
+            if self.activatedAudioSession { try? audio.setActive(false) }
+            if let previous = self.previousAudioCategory {
+                try? audio.setCategory(previous.0, mode: previous.1, options: previous.2)
+            }
+            audio.unlockForConfiguration()
+            self.activatedAudioSession = false
+            self.previousAudioCategory = nil
+            WebRtcPeer.audioOwner = nil
+        }
     }
 
     // MARK: RTCPeerConnectionDelegate
@@ -161,6 +283,14 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
 
     // Unified-plan track arrival: attach the remote video track to the render view.
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams: [RTCMediaStream]) {
+        if let track = rtpReceiver.track as? RTCAudioTrack {
+            WebRtcPeer.onMainVoid {
+                guard !self.rendererClosed else { return }
+                self.remoteAudioTrack?.isEnabled = false
+                self.remoteAudioTrack = track
+                track.isEnabled = self.voiceActive && !self.remoteAudioMuted
+            }
+        }
         if let track = rtpReceiver.track as? RTCVideoTrack {
             WebRtcPeer.onMainVoid {
                 guard !self.rendererClosed else { return }
@@ -203,4 +333,5 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
         if Thread.isMainThread { block() } else { DispatchQueue.main.async { block() } }
     }
 }
+
 

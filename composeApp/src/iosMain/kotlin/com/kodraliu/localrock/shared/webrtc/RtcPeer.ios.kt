@@ -39,6 +39,12 @@ interface RtcNativePeer {
 
     /** The `RTCMTLVideoView` (a `UIView`) that renders the remote track, or null before it arrives. */
     fun renderView(): UIView?
+    fun setVideoFill(fill: Boolean)
+    fun requestMicrophonePermission(onGranted: () -> Unit, onDenied: () -> Unit)
+    fun startVoiceCall(onSuccess: () -> Unit, onError: () -> Unit)
+    fun setMicrophoneMuted(muted: Boolean)
+    fun setRemoteAudioMuted(muted: Boolean)
+    fun stopVoiceCall()
 }
 
 interface RtcNativePeerFactory {
@@ -104,6 +110,27 @@ internal class IosRtcPeer(
         native.diagnostics { if (cont.isActive) cont.resume(it) }
     }
 
+    override val supportsVoiceCall: Boolean = true
+
+    override suspend fun requestMicrophonePermission(): Boolean = suspendCancellableCoroutine { cont ->
+        native.requestMicrophonePermission(
+            onGranted = { if (cont.isActive) cont.resume(true) },
+            onDenied = { if (cont.isActive) cont.resume(false) },
+        )
+    }
+
+    override suspend fun startVoiceCall(): Unit = suspendCancellableCoroutine { cont ->
+        native.startVoiceCall(
+            onSuccess = { if (cont.isActive) cont.resume(Unit) else native.stopVoiceCall() },
+            onError = { if (cont.isActive) cont.resumeWithException(RuntimeException("Phone audio could not start")) },
+        )
+        cont.invokeOnCancellation { native.stopVoiceCall() }
+    }
+
+    override fun setMicrophoneMuted(muted: Boolean) = native.setMicrophoneMuted(muted)
+    override fun setRemoteAudioMuted(muted: Boolean) = native.setRemoteAudioMuted(muted)
+    override fun stopVoiceCall() = native.stopVoiceCall()
+
     override fun close() {
         if (_connectionState.value != RtcConnectionState.CLOSED) {
             _connectionState.value = RtcConnectionState.CLOSED
@@ -112,6 +139,7 @@ internal class IosRtcPeer(
     }
 
     internal fun renderView(): UIView? = native.renderView()
+    internal fun setVideoFill(fill: Boolean) = native.setVideoFill(fill)
 
     // ---- RtcNativePeerListener (invoked from Swift) ----
 
@@ -132,4 +160,5 @@ internal class IosRtcPeer(
         }
     }
 }
+
 
