@@ -132,9 +132,9 @@ do {
     }
     print("Native offer structure, local descriptions and Opus/H264 answers passed.")
 } catch CheckFailure.failed(let message) {
-    fputs("Offer check failed: \(message)\n", stderr)
+    print("Offer check failed: \(message)")
     exit(1)
 } catch {
-    fputs("Offer check failed in native WebRTC setup.\n", stderr)
+    print("Offer check failed in native WebRTC setup.")
     exit(1)
 }
