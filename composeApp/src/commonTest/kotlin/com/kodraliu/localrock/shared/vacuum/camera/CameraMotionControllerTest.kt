@@ -13,6 +13,7 @@ class CameraMotionControllerTest {
         var state = 3
         var cleaning = 0
         var startDelay = 0L
+        var enterManualMode = true
         var statusDelay = 0L
         var refuse: String? = null
         override suspend fun call(method: String, params: JsonElement): V1Response {
@@ -24,7 +25,8 @@ class CameraMotionControllerTest {
                     put("state",state);put("in_cleaning",cleaning);put("error_code",0);put("map_status",0)
                 }) },null)
             }
-            if (method == "app_rc_start") delay(startDelay)
+            if (method == "app_rc_start") { delay(startDelay); if (enterManualMode) state=7 }
+            if (method == "app_rc_end") state=3
             if (method == "app_goto_target") state=16
             if (method == "app_stop") state=3
             return V1Response(null,buildJsonArray {add("ok")},null)
@@ -42,6 +44,8 @@ class CameraMotionControllerTest {
         val last=rpc.calls[rpc.calls.lastIndex-1].second.jsonArray.single().jsonObject
         assertEquals(0.0,last["velocity"]!!.jsonPrimitive.double)
         assertEquals(300,last["duration"]!!.jsonPrimitive.int)
+        val sequences=rpc.calls.filter { it.first=="app_rc_move" }.map { it.second.jsonArray.single().jsonObject["seqnum"]!!.jsonPrimitive.int }
+        assertEquals((1..sequences.size).toList(),sequences)
         val count=rpc.calls.size;advanceTimeBy(5000);runCurrent();assertEquals(count,rpc.calls.size)
         c.dispose();advanceUntilIdle()
     }
@@ -75,6 +79,14 @@ class CameraMotionControllerTest {
             assertFalse("app_rc_start" in rpc.methods());assertNotNull(c.error.value)
             c.dispose();advanceUntilIdle()
         }
+    }
+    @Test fun missing_manual_mode_never_sends_nonzero_motion() = runTest {
+        val rpc=Rpc().apply {enterManualMode=false};val c=controller(rpc)
+        c.hold(CameraMotionController.Direction.FORWARD);advanceUntilIdle()
+        val moves=rpc.calls.filter {it.first=="app_rc_move"}
+        assertTrue(moves.all {it.second.jsonArray.single().jsonObject["velocity"]!!.jsonPrimitive.double==0.0})
+        assertEquals("app_rc_end",rpc.methods().last());assertNotNull(c.error.value)
+        c.dispose();advanceUntilIdle()
     }
     @Test fun refused_start_does_not_send_move_or_end() = runTest {
         val rpc=Rpc().apply {refuse="app_rc_start"};val c=controller(rpc)

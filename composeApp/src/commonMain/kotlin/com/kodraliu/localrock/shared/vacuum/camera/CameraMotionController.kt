@@ -37,6 +37,7 @@ class CameraMotionController internal constructor(
         holding = true
         launchOperation {
             var requested = false
+            var sequence = 0
             try {
                 requireReady()
                 requireIdle()
@@ -46,15 +47,25 @@ class CameraMotionController internal constructor(
                     try { ack("app_rc_start") } catch (e: MotionRefused) { requested = false; throw e }
                 }
                 currentCoroutineContext().ensureActive()
+                // app_rc_start may acknowledge before the robot enters manual mode.
+                withTimeout(1_500) {
+                    while (true) {
+                        requireReady()
+                        val status = readStatus()
+                        check(status["in_cleaning"]?.jsonPrimitive?.intOrNull == 0)
+                        if (status["state"]?.jsonPrimitive?.intOrNull in setOf(4, 7)) break
+                        delay(100)
+                    }
+                }
                 while (currentCoroutineContext().isActive) {
                     requireReady()
-                    ack("app_rc_move", movement(direction.velocity, direction.omega))
+                    ack("app_rc_move", movement(direction.velocity, direction.omega, ++sequence))
                     delay(200)
                 }
             } finally {
                 holding = false
                 if (requested) withContext(NonCancellable) {
-                    val zero = runCatching { ack("app_rc_move", movement(0.0, 0.0)) }.isSuccess
+                    val zero = runCatching { ack("app_rc_move", movement(0.0, 0.0, ++sequence)) }.isSuccess
                     val ended = runCatching { ack("app_rc_end") }.isSuccess
                     if (!zero || !ended) _error.value = "Drive release could not be confirmed. Check the robot before continuing."
                 }
@@ -164,9 +175,9 @@ class CameraMotionController internal constructor(
         if ((if (result is JsonArray) result.singleOrNull() else result) != JsonPrimitive("ok")) throw MotionRefused()
     }
 
-    private fun movement(velocity: Double, omega: Double) = buildJsonArray {
+    private fun movement(velocity: Double, omega: Double, sequence: Int) = buildJsonArray {
         add(buildJsonObject {
-            put("velocity", velocity); put("omega", omega); put("duration", 300)
+            put("velocity", velocity); put("omega", omega); put("duration", 300); put("seqnum", sequence)
         })
     }
 }
