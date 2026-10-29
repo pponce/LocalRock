@@ -139,6 +139,12 @@ class CameraMotionController internal constructor(
         endManualMode()
     }
 
+    /** A later foreground visit observes any continuing clean as an existing task. */
+    fun background() {
+        _viewerStartedActivity.value = false
+        stop(includeDock = false)
+    }
+
     fun dispose() {
         if (disposed) return
         disposed = true
