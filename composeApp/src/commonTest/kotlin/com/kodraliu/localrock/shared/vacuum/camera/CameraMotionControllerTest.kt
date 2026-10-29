@@ -262,4 +262,13 @@ class CameraMotionControllerTest {
         c.dispose();advanceUntilIdle()
     }
 
+    @Test fun background_preserves_cleaning_and_resets_viewer_activity() = runTest {
+        val rpc=Rpc().apply {state=8};val c=controller(rpc)
+        c.cleaning(CameraCleaningAction.START);advanceUntilIdle();assertTrue(c.viewerStartedActivity.value)
+        c.background();advanceUntilIdle()
+        assertFalse(c.viewerStartedActivity.value);assertEquals(5,rpc.state)
+        assertFalse("app_pause" in rpc.methods());assertFalse("app_charge" in rpc.methods());assertFalse("app_stop" in rpc.methods())
+        c.dispose();advanceUntilIdle()
+    }
+
 }
