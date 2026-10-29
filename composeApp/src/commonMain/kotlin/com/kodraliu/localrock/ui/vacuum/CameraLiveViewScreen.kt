@@ -181,7 +181,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(viewModel.deviceName, style = MaterialTheme.typography.titleMedium)
-                    Text("While docked, open video and use Pin-and-Go or Play to move the robot. Play starts cleaning.", textAlign = TextAlign.Center)
+                    Text("While docked, open video, choose a spot on the map, and tap Go to move the robot.", textAlign = TextAlign.Center)
                     CameraCleaningButton(viewModel, motion)
                     motionError?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
                     Text("Enter your existing camera PIN or pattern. Activate remote viewing in the official Roborock app before switching to the local server.",

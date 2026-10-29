@@ -21,6 +21,11 @@ class CameraLiveSessionTest {
         var receivedVideo = true
         var rejectAnswer = false
         var answerApplied = false
+        override val supportsVoiceCall = true
+        var audioActive = false
+        override suspend fun requestMicrophonePermission() = true
+        override suspend fun startVoiceCall() { audioActive = true }
+        override fun stopVoiceCall() { audioActive = false }
         val remoteCandidates = mutableListOf<RtcIceCandidate>()
         var offerOptions: RtcOfferOptions? = null
         override suspend fun createOffer(options: RtcOfferOptions): String {
@@ -48,6 +53,7 @@ class CameraLiveSessionTest {
         val offers = mutableListOf<String>()
         val qualityChanges = mutableListOf<JsonElement>()
         var qualityDelay = 0L
+        var voiceStopDelay = 0L
         var pinResult: JsonElement? = JsonPrimitive(true)
         var owner: String? = "none"
         var startDelay: Long = 0
@@ -85,6 +91,10 @@ class CameraLiveSessionTest {
                     delay(qualityDelay)
                     JsonArray(listOf(JsonPrimitive("ok")))
                 }
+                "stop_voice_chat" -> {
+                    delay(voiceStopDelay)
+                    JsonArray(listOf(JsonPrimitive("ok")))
+                }
                 "get_turn_server" -> buildJsonObject {
                     put("url", "turn:example.test:3478"); put("user", "test"); put("pwd", "test")
                 }
@@ -111,6 +121,35 @@ class CameraLiveSessionTest {
         return CameraLiveSession(rpc, { peer },
             CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])),
             clientId = { "test-client-${++id}" }, connectTimeoutMs = 5_000, cleanupTimeoutMs = 500)
+    }
+
+    @Test fun ending_video_stops_audio_before_releasing_preview_and_waits_for_call_cleanup() = runTest {
+        val rpc = FakeRpc().apply { voiceStopDelay = 300 }
+        val peer = FakePeer(); val live = live(rpc, peer)
+        live.start("1234"); runCurrent()
+        live.voice.start(); runCurrent()
+        assertTrue(peer.audioActive); assertTrue(live.voice.active.value)
+        live.stop()
+        assertFalse(peer.audioActive)
+        runCurrent()
+        assertFalse(peer.closed); assertTrue(rpc.stoppedIds.isEmpty())
+        advanceTimeBy(301); runCurrent()
+        assertTrue(peer.closed)
+        assertEquals(listOf("test-client-1"), rpc.stoppedIds)
+        assertTrue(rpc.calls.indexOf("stop_voice_chat") < rpc.calls.indexOf("stop_camera_preview"))
+        assertFalse(live.voice.active.value)
+        live.dispose()
+    }
+
+    @Test fun connection_loss_releases_the_active_call_and_preview() = runTest {
+        val rpc = FakeRpc(); val peer = FakePeer(); val live = live(rpc, peer)
+        live.start("1234"); runCurrent(); live.voice.start(); runCurrent()
+        assertTrue(peer.audioActive)
+        peer.connectionState.value = RtcConnectionState.DISCONNECTED; runCurrent()
+        assertFalse(peer.audioActive); assertFalse(live.voice.active.value)
+        assertEquals(1, rpc.calls.count { it == "stop_voice_chat" })
+        assertTrue(peer.closed); assertEquals(listOf("test-client-1"), rpc.stoppedIds)
+        live.dispose()
     }
 
     @Test fun all_four_tests_send_the_selected_offer_and_preview_quality_and_release_their_camera() = runTest(timeout = 10.seconds) {
