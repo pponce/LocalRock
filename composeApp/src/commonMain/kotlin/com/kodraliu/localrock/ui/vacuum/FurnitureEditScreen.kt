@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -29,16 +30,26 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import com.kodraliu.localrock.shared.vacuum.*
@@ -49,7 +60,7 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
-internal fun FurnitureEditScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
+internal fun FurnitureEditScreen(viewModel: VacuumViewModel, onBack: () -> Unit, onSaved: () -> Unit) {
     val repository = viewModel.repository
     val liveMap by repository.parsedMap.collectAsState()
     val scope = rememberCoroutineScope()
@@ -93,30 +104,42 @@ internal fun FurnitureEditScreen(viewModel: VacuumViewModel, onBack: () -> Unit)
             draft = draft.map { if (it.key == item.key) item else it }; notice = null
         }
     }
+    fun delete(key: Int) {
+        if (canEdit) {
+            draft = draft.filterNot { it.key == key }
+            selectedKey = null
+            notice = null
+        }
+    }
 
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("Furniture") },
-            navigationIcon = { TextButton(onClick = ::requestBack, enabled = !working) { Text("Cancel") } },
+            navigationIcon = {
+                IconButton(onClick = ::requestBack, enabled = !working) {
+                    Icon(Icons.Default.ArrowBack, "Back to Edit map")
+                }
+            },
             actions = {
                 if (working) CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
                 else {
                     IconButton(onClick = { if (dirty) discardAction = "reload" else reload() }) {
                         Icon(Icons.Default.Refresh, "Reload furniture")
                     }
-                    Button(enabled = canEdit && dirty, modifier = Modifier.padding(end = 8.dp), onClick = {
+                    if (dirty) Button(enabled = canEdit, modifier = Modifier.padding(end = 8.dp), onClick = {
                         val base = snapshot ?: return@Button
                         val edits = draft.toList()
                         working = true; requiresReload = true; notice = "Saving and checking the robot's map…"
                         scope.launch {
                             try {
                                 accept(repository.saveFurnitureEdits(base, edits))
-                                notice = "Saved. The robot's map shows your furniture."
+                                onSaved()
                             } catch (e: CancellationException) { throw e }
                             catch (e: Exception) { notice = e.message ?: "Couldn't confirm the save. Reload the map to check." }
                             finally { working = false }
                         }
                     }) { Text("Save") }
+                    else TextButton(onClick = ::requestBack, modifier = Modifier.padding(end = 8.dp)) { Text("Done") }
                 }
             },
         )
@@ -132,7 +155,7 @@ internal fun FurnitureEditScreen(viewModel: VacuumViewModel, onBack: () -> Unit)
                 }
             } else {
                 Box(Modifier.fillMaxWidth().weight(1f)) {
-                    FurnitureCanvas(map, draft, selectedKey, viewport, canEdit, { selectedKey = it }, ::replace, Modifier.fillMaxSize())
+                    FurnitureCanvas(map, draft, selectedKey, viewport, canEdit, { selectedKey = it }, ::replace, ::delete, Modifier.fillMaxSize())
                     if (changedRemotely || requiresReload || notice != null) {
                         Surface(Modifier.align(Alignment.TopCenter).padding(12.dp), shape = RoundedCornerShape(16.dp), tonalElevation = 4.dp) {
                             Column(Modifier.padding(12.dp)) {
@@ -146,7 +169,8 @@ internal fun FurnitureEditScreen(viewModel: VacuumViewModel, onBack: () -> Unit)
                     }
                 }
                 Surface(Modifier.heightIn(max = dockLimit), tonalElevation = 3.dp, shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)) {
-                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = 136.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.Center) {
                         if (selected == null) {
                             Text("Tap furniture to select it. Drag the map to pan; pinch to zoom.", style = MaterialTheme.typography.bodySmall)
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -158,31 +182,16 @@ internal fun FurnitureEditScreen(viewModel: VacuumViewModel, onBack: () -> Unit)
                         } else {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(selected.kind?.label ?: "Furniture", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                                IconButton(enabled = canEdit, onClick = {
-                                    draft = draft.filterNot { it.key == selected.key }; selectedKey = null
-                                }) { Icon(Icons.Default.Delete, "Delete selected furniture") }
-                                TextButton(onClick = { selectedKey = null }, enabled = !working) { Text("Done") }
-                            }
-                            Text("Drag to move, or use the controls below.", style = MaterialTheme.typography.bodySmall)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(enabled = canEdit, onClick = { replace(selected.rotated(15.0)) }) { Icon(Icons.Default.RotateLeft, "Rotate counterclockwise 15 degrees") }
-                                Text("${((selected.angleDegrees.roundToInt() % 360) + 360) % 360}°")
-                                IconButton(enabled = canEdit, onClick = { replace(selected.rotated(-15.0)) }) { Icon(Icons.Default.RotateRight, "Rotate clockwise 15 degrees") }
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                IconButton(enabled = canEdit, onClick = { replace(selected.moved(-50, 0)) }) { Icon(Icons.Default.ArrowBack, "Move left 5 cm") }
-                                IconButton(enabled = canEdit, onClick = { replace(selected.moved(0, 50)) }) { Icon(Icons.Default.ArrowUpward, "Move up 5 cm") }
-                                IconButton(enabled = canEdit, onClick = { replace(selected.moved(0, -50)) }) { Icon(Icons.Default.ArrowDownward, "Move down 5 cm") }
-                                IconButton(enabled = canEdit, onClick = { replace(selected.moved(50, 0)) }) { Icon(Icons.Default.ArrowForward, "Move right 5 cm") }
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FurnitureDimension("Width", selected.widthMm, canEdit, Modifier.weight(1f)) {
-                                    replace(selected.resized(it, selected.depthMm))
-                                }
-                                FurnitureDimension("Depth", selected.depthMm, canEdit, Modifier.weight(1f)) {
-                                    replace(selected.resized(selected.widthMm, it))
+                                FilledTonalButton(onClick = { selectedKey = null }, enabled = !working) {
+                                    Icon(Icons.Default.Check, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Done")
                                 }
                             }
+                            Text("Tap × to delete. Drag the other corners to rotate, move or resize.",
+                                style = MaterialTheme.typography.bodySmall)
+                            Text("${(selected.widthMm / 10).roundToInt()} × ${(selected.depthMm / 10).roundToInt()} cm",
+                                style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
                         }
                     }
                 }
@@ -250,18 +259,6 @@ internal fun FurnitureEditScreen(viewModel: VacuumViewModel, onBack: () -> Unit)
 }
 
 @Composable
-private fun FurnitureDimension(label: String, mm: Double, enabled: Boolean, modifier: Modifier, onChange: (Double) -> Unit) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = MaterialTheme.typography.labelMedium)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            IconButton(enabled = enabled && mm > 100, onClick = { onChange(maxOf(100.0, mm - 50)) }) { Icon(Icons.Default.Remove, "Reduce $label by 5 cm") }
-            Text("${(mm / 10).roundToInt()} cm", style = MaterialTheme.typography.bodyMedium)
-            IconButton(enabled = enabled, onClick = { onChange(mm + 50) }) { Icon(Icons.Default.Add, "Increase $label by 5 cm") }
-        }
-    }
-}
-
-@Composable
 private fun FurniturePreview(kind: FurnitureKind, modifier: Modifier) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < .5f
     Canvas(modifier) {
@@ -276,11 +273,16 @@ private fun FurniturePreview(kind: FurnitureKind, modifier: Modifier) {
 @Composable
 private fun FurnitureCanvas(
     map: ParsedMap, draft: List<FurniturePlacement>, selectedKey: Int?, viewport: MapViewport,
-    enabled: Boolean, onSelect: (Int?) -> Unit, onChange: (FurniturePlacement) -> Unit, modifier: Modifier,
+    enabled: Boolean, onSelect: (Int?) -> Unit, onChange: (FurniturePlacement) -> Unit,
+    onDelete: (Int) -> Unit, modifier: Modifier,
 ) {
     val bitmap = rememberMapBitmap(map, drawFurniture = false)
     val dark = MaterialTheme.colorScheme.surface.luminance() < .5f
     val primary = MaterialTheme.colorScheme.primary
+    val density = LocalDensity.current
+    val gap = with(density) { 24.dp.toPx() }
+    val minSide = with(density) { 96.dp.toPx() }
+    val handleRadius = with(density) { 24.dp.toPx() }
     var viewSize by remember { mutableStateOf(Size.Zero) }
     val bounds = remember(map) { map.contentBoundsNorm() }
     var scale by viewport::scale
@@ -297,35 +299,59 @@ private fun FurnitureCanvas(
     val currentEnabled by rememberUpdatedState(enabled)
     val currentSelect by rememberUpdatedState(onSelect)
     val currentChange by rememberUpdatedState(onChange)
-    Canvas(modifier.clipToBounds().onSizeChanged { viewSize = it.toSize() }
-        .semantics { contentDescription = "Furniture map. Use the Items list to select furniture and the placement controls to edit it." }
-        .pointerInput(map, viewSize) {
+    val currentDelete by rememberUpdatedState(onDelete)
+    val fitted = map.fittedSize(viewSize)
+    val selected = draft.firstOrNull { it.key == selectedKey }
+    fun screenCorners(item: FurniturePlacement) = item.corners.map {
+        map.mmToCanvas(it.x, it.y, fitted.width, fitted.height) * scale + offset
+    }
+    val frame = selected?.takeIf { fitted.width > 0f && fitted.height > 0f }?.let {
+        furnitureSelectionCorners(screenCorners(it), gap, minSide)
+    }
+    Box(modifier.clipToBounds().onSizeChanged { viewSize = it.toSize() }
+        .pointerInput(map, viewSize, gap, minSide, handleRadius) {
             val fitted = map.fittedSize(size.toSize())
             if (fitted.width <= 0f || fitted.height <= 0f) return@pointerInput
             fun mm(point: Offset) = map.canvasToMm((point - offset) / scale, fitted.width, fitted.height)
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val startMm = mm(down.position)
-                val startItem = currentDraft.firstOrNull { it.key == currentSelected && it.contains(startMm.first, startMm.second) }
+                val startItem = currentDraft.firstOrNull { it.key == currentSelected }
+                val startFrame = startItem?.let { item ->
+                    furnitureSelectionCorners(item.corners.map {
+                        map.mmToCanvas(it.x, it.y, fitted.width, fitted.height) * scale + offset
+                    }, gap, minSide)
+                }
+                val handle = if (currentEnabled && startFrame != null)
+                    furnitureHandleAt(down.position, startFrame, handleRadius) else null
+                val action = handle ?: if (startItem?.contains(startMm.first, startMm.second) == true)
+                    FurnitureHandle.MOVE else null
                 var pastSlop = false; var multiTouch = false; var last = down.position
                 while (true) {
                     val event = awaitPointerEvent()
                     val pressed = event.changes.filter { it.pressed }
                     if (pressed.isEmpty()) {
                         if (!pastSlop && !multiTouch && currentEnabled) {
-                            val point = mm(down.position)
-                            val slop = 12.dp.toPx() / scale * map.width / fitted.width * MM_PER_CELL
-                            val hit = currentDraft.lastOrNull { item ->
-                                item.contains(point.first, point.second) || item.corners.indices.any { i ->
-                                    val a = item.corners[i]; val b = item.corners[(i + 1) % 4]
-                                    distanceToSegmentMm(point.first, point.second, a.x, a.y, b.x, b.y) <= slop
+                            if (handle == FurnitureHandle.DELETE && startItem != null && startFrame != null) {
+                                val up = event.changes.firstOrNull { it.id == down.id }
+                                if (up != null && furnitureHandleAt(up.position, startFrame, handleRadius) == handle)
+                                    currentDelete(startItem.key)
+                            } else if (handle == null) {
+                                val point = mm(down.position)
+                                val slop = 12.dp.toPx() / scale * map.width / fitted.width * MM_PER_CELL
+                                val hit = currentDraft.lastOrNull { item ->
+                                    item.contains(point.first, point.second) || item.corners.indices.any { i ->
+                                        val a = item.corners[i]; val b = item.corners[(i + 1) % 4]
+                                        distanceToSegmentMm(point.first, point.second, a.x, a.y, b.x, b.y) <= slop
+                                    }
                                 }
+                                currentSelect(hit?.key)
                             }
-                            currentSelect(hit?.key)
+                            event.changes.forEach { it.consume() }
                         }
                         break
                     }
-                    if (pressed.size >= 2 || multiTouch) {
+                    if (pressed.size >= 2) {
                         multiTouch = true
                         val transformed = zoomMap(scale, offset, event.calculateCentroid(), event.calculatePan(),
                             event.calculateZoom(), fitted, size.toSize())
@@ -333,36 +359,116 @@ private fun FurnitureCanvas(
                         event.changes.forEach { it.consume() }
                         continue
                     }
+                    // Lifting one finger after pinching must not resume an old furniture drag.
+                    if (multiTouch) { event.changes.forEach { it.consume() }; continue }
                     val change = pressed.first()
                     if (!pastSlop && (change.position - down.position).getDistance() < viewConfiguration.touchSlop) continue
                     pastSlop = true; change.consume()
-                    if (startItem != null && currentEnabled) {
+                    if (startItem != null && action != null && currentEnabled) {
                         val point = mm(change.position)
-                        val moved = startItem.moved(point.first - startMm.first, point.second - startMm.second)
-                        if (validFurniturePlacement(moved)) currentChange(moved)
+                        val dx = point.first - startMm.first; val dy = point.second - startMm.second
+                        val updated = when (action) {
+                            FurnitureHandle.MOVE -> startItem.moved(dx, dy)
+                            FurnitureHandle.ROTATE -> startItem.rotatedFromHandle(startMm, point)
+                            FurnitureHandle.RESIZE -> startItem.resizedFromHandle(dx, dy)
+                            FurnitureHandle.DELETE -> startItem
+                        }
+                        if (action != FurnitureHandle.DELETE && validFurniturePlacement(updated)) currentChange(updated)
                     } else offset = clampMapOffset(offset + change.position - last, scale, fitted, size.toSize())
                     last = change.position
                 }
             }
         }) {
-        val fitted = map.fittedSize(size)
+      Canvas(Modifier.fillMaxSize().semantics {
+          contentDescription = "Furniture map. Select furniture on the map or in Items. Its four corner controls delete, rotate, move and resize."
+      }) {
+        val fittedCanvas = map.fittedSize(size)
         withTransform({ translate(offset.x, offset.y); scale(scale, scale, Offset.Zero) }) {
-            drawImage(bitmap, dstSize = IntSize(fitted.width.roundToInt(), fitted.height.roundToInt()), filterQuality = FilterQuality.None)
+            drawImage(bitmap, dstSize = IntSize(fittedCanvas.width.roundToInt(), fittedCanvas.height.roundToInt()), filterQuality = FilterQuality.None)
             drawIntoCanvas { canvas ->
                 map.furniture.filter { it.isVisible && it.editablePlacement() == null }.forEach { item ->
-                    drawFurnitureSymbol(canvas, item.cornersMm.map { map.mmToCanvas(it.x, it.y, fitted.width, fitted.height) },
+                    drawFurnitureSymbol(canvas, item.cornersMm.map { map.mmToCanvas(it.x, it.y, fittedCanvas.width, fittedCanvas.height) },
                         item.type, item.subtype, dark, 1.dp.toPx() / scale)
                 }
                 draft.forEach { item ->
-                    drawFurnitureSymbol(canvas, item.corners.map { map.mmToCanvas(it.x, it.y, fitted.width, fitted.height) },
+                    drawFurnitureSymbol(canvas, item.corners.map { map.mmToCanvas(it.x, it.y, fittedCanvas.width, fittedCanvas.height) },
                         item.type, item.subtype, dark, 1.dp.toPx() / scale)
                 }
             }
-            draft.firstOrNull { it.key == selectedKey }?.let { item ->
-                val points = item.corners.map { map.mmToCanvas(it.x, it.y, fitted.width, fitted.height) }
-                val path = Path().apply { moveTo(points[0].x, points[0].y); points.drop(1).forEach { lineTo(it.x, it.y) }; close() }
-                drawPath(path, primary, style = Stroke(2.dp.toPx() / scale))
+        }
+        frame?.let { points ->
+            val path = Path().apply { moveTo(points[0].x, points[0].y); points.drop(1).forEach { lineTo(it.x, it.y) }; close() }
+            drawPath(path, primary.copy(alpha = if (enabled) 1f else .4f),
+                style = Stroke(2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))))
+        }
+      }
+      if (selected != null && frame != null) {
+          FurnitureHandle.entries.forEach { handle ->
+              FurnitureCornerControl(handle, frame[handle.corner], selected, enabled, onChange, onDelete)
+          }
+      }
+    }
+}
+
+/** Semantics expose precise steps to VoiceOver/TalkBack; touch uses the shared map gesture above. */
+@Composable
+private fun FurnitureCornerControl(handle: FurnitureHandle, center: Offset, item: FurniturePlacement,
+    enabled: Boolean, onChange: (FurniturePlacement) -> Unit, onDelete: (Int) -> Unit) {
+    val radius = with(LocalDensity.current) { 24.dp.toPx() }
+    val label = when (handle) {
+        FurnitureHandle.DELETE -> "Delete furniture"
+        FurnitureHandle.ROTATE -> "Rotate furniture"
+        FurnitureHandle.MOVE -> "Move furniture"
+        FurnitureHandle.RESIZE -> "Resize furniture"
+    }
+    val icon = when (handle) {
+        FurnitureHandle.DELETE -> Icons.Default.Close
+        FurnitureHandle.ROTATE -> Icons.Default.RotateRight
+        FurnitureHandle.MOVE -> Icons.Default.OpenWith
+        FurnitureHandle.RESIZE -> Icons.Default.OpenInFull
+    }
+    fun update(value: FurniturePlacement): Boolean {
+        if (!enabled || !validFurniturePlacement(value)) return false
+        onChange(value)
+        return true
+    }
+    fun resize(width: Double, height: Double) = update(item.resized(maxOf(101.0, width), maxOf(101.0, height)))
+    Box(Modifier.absoluteOffset { IntOffset((center.x - radius).roundToInt(), (center.y - radius).roundToInt()) }
+        .size(48.dp).semantics {
+            role = Role.Button
+            contentDescription = label
+            stateDescription = "${(item.widthMm / 10).roundToInt()} by ${(item.depthMm / 10).roundToInt()} centimeters"
+            if (!enabled) disabled()
+            else when (handle) {
+                FurnitureHandle.DELETE -> onClick { onDelete(item.key); true }
+                FurnitureHandle.ROTATE -> {
+                    onClick("Rotate clockwise 15 degrees") { update(item.rotated(-15.0)) }
+                    customActions = listOf(
+                        CustomAccessibilityAction("Rotate clockwise 15 degrees") { update(item.rotated(-15.0)) },
+                        CustomAccessibilityAction("Rotate counterclockwise 15 degrees") { update(item.rotated(15.0)) })
+                }
+                FurnitureHandle.MOVE -> {
+                    customActions = listOf(
+                        CustomAccessibilityAction("Move left 5 cm") { update(item.moved(-50, 0)) },
+                        CustomAccessibilityAction("Move right 5 cm") { update(item.moved(50, 0)) },
+                        CustomAccessibilityAction("Move up 5 cm") { update(item.moved(0, 50)) },
+                        CustomAccessibilityAction("Move down 5 cm") { update(item.moved(0, -50)) })
+                }
+                FurnitureHandle.RESIZE -> {
+                    customActions = listOf(
+                        CustomAccessibilityAction("Increase width 5 cm") { resize(item.widthMm + 50, item.depthMm) },
+                        CustomAccessibilityAction("Reduce width 5 cm") { resize(item.widthMm - 50, item.depthMm) },
+                        CustomAccessibilityAction("Increase height 5 cm") { resize(item.widthMm, item.depthMm + 50) },
+                        CustomAccessibilityAction("Reduce height 5 cm") { resize(item.widthMm, item.depthMm - 50) })
+                }
             }
+        }, contentAlignment = Alignment.Center) {
+        Surface(shape = CircleShape,
+            color = (if (handle == FurnitureHandle.DELETE) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                .copy(alpha = if (enabled) 1f else .4f),
+            contentColor = if (handle == FurnitureHandle.DELETE) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
+            shadowElevation = 2.dp, modifier = Modifier.size(32.dp)) {
+            Box(contentAlignment = Alignment.Center) { Icon(icon, null, Modifier.size(20.dp)) }
         }
     }
 }
