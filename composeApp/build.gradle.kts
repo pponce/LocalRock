@@ -67,6 +67,9 @@ kotlin {
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
         }
+        androidUnitTest.dependencies {
+            implementation("org.robolectric:robolectric:4.16.1")
+        }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.ktor.client.mock)

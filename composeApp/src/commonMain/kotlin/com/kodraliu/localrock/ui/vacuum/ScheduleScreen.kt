@@ -59,6 +59,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import com.kodraliu.localrock.ui.adaptive.CenteredContent
 import com.kodraliu.localrock.ui.rememberUse24HourClock
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -157,43 +158,47 @@ fun ScheduleScreen(
                 },
             )
         },
-        floatingActionButton = {
-            if (!saving && !loading && loadError == null) FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Default.Add, "Add schedule")
-            }
-        },
     ) { padding ->
-        if (loading || loadError != null) {
-            Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (loading) "Loading schedules…" else loadError.orEmpty())
-                if (!loading) TextButton(onClick = { refresh++ }) { Text("Retry") }
-            }
-        } else if (timers.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Default.Schedule, null, Modifier.size(48.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("No schedules yet", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Tap + to schedule a recurring clean",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
+        CenteredContent {
+            if (loading || loadError != null) {
+                Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(if (loading) "Loading schedules…" else loadError.orEmpty())
+                    if (!loading) TextButton(onClick = { refresh++ }) { Text("Retry") }
+                }
+            } else if (timers.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Default.Schedule, null, Modifier.size(48.dp), MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("No schedules yet", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Tap + to schedule a recurring clean",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(modifier = Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(timers.sortedWith(compareBy<CleanTimer> { it.hour }.thenBy { it.minute }.thenBy { it.id }), key = { it.id }) { timer ->
+                        TimerRow(
+                            timer = timer,
+                            busy = saving,
+                            rooms = rooms,
+                            currentFlag = currentFlag,
+                            onEdit = { if (timer.editable) editing = timer },
+                            onToggle = { saveTimer { repository.toggleTimer(timer) } },
+                            onDelete = { saveTimer { repository.deleteTimer(timer) } },
+                        )
+                    }
                 }
             }
-        } else {
-            LazyColumn(modifier = Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(timers.sortedWith(compareBy<CleanTimer> { it.hour }.thenBy { it.minute }.thenBy { it.id }), key = { it.id }) { timer ->
-                    TimerRow(
-                        timer = timer,
-                        busy = saving,
-                        rooms = rooms,
-                        currentFlag = currentFlag,
-                        onEdit = { if (timer.editable) editing = timer },
-                        onToggle = { saveTimer { repository.toggleTimer(timer) } },
-                        onDelete = { saveTimer { repository.deleteTimer(timer) } },
-                    )
-                }
+            if (!saving && !loading && loadError == null) FloatingActionButton(
+                onClick = { showAddDialog = true },
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 16.dp + padding.calculateBottomPadding()),
+            ) {
+                Icon(Icons.Default.Add, "Add schedule")
             }
         }
     }

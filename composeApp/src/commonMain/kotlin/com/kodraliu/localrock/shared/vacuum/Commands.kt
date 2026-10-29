@@ -141,7 +141,6 @@ suspend fun VacuumSession.updTimer(id: String, enabled: Boolean): V1Response =
     ))))
 
 /** Decides get/set/upd/del_timer vs get/set/upd/del_server_timer; see [usesServerTimer]. */
-suspend fun VacuumSession.getInitStatus(): V1Response = sendCommand("app_get_init_status")
 
 suspend fun VacuumSession.getServerTimer(): V1Response = sendCommand("get_server_timer")
 
@@ -214,6 +213,22 @@ suspend fun VacuumSession.setWashTowelMode(mode: Int): V1Response =
 suspend fun VacuumSession.getSmartWashParams(): V1Response = sendCommand("get_smart_wash_params")
 suspend fun VacuumSession.setSmartWashParams(settings: SmartWashSettings): V1Response =
     sendCommandRaw("set_smart_wash_params", encodeSmartWashParams(settings))
+
+suspend fun VacuumSession.getInitStatus(): V1Response = sendCommand("app_get_init_status")
+suspend fun VacuumSession.getDryerSetting(): V1Response = sendCommand("app_get_dryer_setting")
+
+suspend fun VacuumSession.setDryerSetting(body: JsonObject): V1Response = sendCommandRaw("app_set_dryer_setting", body)
+
+suspend fun VacuumSession.getWashWaterTemperature(): V1Response = sendCommand("get_wash_water_temperature")
+suspend fun VacuumSession.setWashWaterTemperature(value: Int): V1Response =
+    sendCommandRaw("set_wash_water_temperature", JsonObject(mapOf("values" to JsonPrimitive(value))))
+
+suspend fun VacuumSession.getValleyElectricityTimer(): V1Response = sendCommand("get_valley_electricity_timer")
+suspend fun VacuumSession.setValleyElectricityTimer(startHour: Int, startMinute: Int, endHour: Int, endMinute: Int): V1Response =
+    sendCommand("set_valley_electricity_timer", listOf(
+        JsonPrimitive(startHour), JsonPrimitive(startMinute), JsonPrimitive(endHour), JsonPrimitive(endMinute),
+    ))
+suspend fun VacuumSession.closeValleyElectricityTimer(): V1Response = sendCommand("close_valley_electricity_timer")
 
 suspend fun VacuumSession.getDustCollectionMode(): V1Response = sendCommand("get_dust_collection_mode")
 suspend fun VacuumSession.setDustCollectionMode(mode: Int): V1Response =

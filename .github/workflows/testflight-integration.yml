@@ -39,7 +39,7 @@ jobs:
             await github.rest.checks.create({owner: context.repo.owner, repo: context.repo.repo,
               head_sha: context.sha, name: 'Combined shared test diagnostics', status: 'completed',
               conclusion: '${{ job.status }}' === 'success' ? 'success' : 'failure',
-              output: {title: 'Shared tests and Android compilation', summary: summary.slice(-10000) || 'See output.',
+              output: {title: 'Shared tests and Android compilation', summary: summary.slice(-50000) || 'See output.',
                 text: '```text\n' + log.slice(-48000) + '\n```'}});
       - uses: actions/upload-artifact@v4
         if: always()
@@ -76,6 +76,16 @@ jobs:
           set -o pipefail
           ./gradlew :composeApp:compileKotlinIosArm64 :composeApp:compileKotlinIosSimulatorArm64 --stacktrace 2>&1 | tee build.log
           xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Release -destination 'generic/platform=iOS' -derivedDataPath local-work/DerivedData -archivePath local-work/LocalRock.xcarchive CODE_SIGNING_ALLOWED=NO archive 2>&1 | tee -a build.log
+      - name: Record effective archived version and build
+        run: |
+          python3 - <<'PYINFO'
+          from pathlib import Path
+          import plistlib
+          app = next(Path('local-work/LocalRock.xcarchive/Products/Applications').glob('*.app'))
+          info = plistlib.loads((app / 'Info.plist').read_bytes())
+          print('Archived version:', info['CFBundleShortVersionString'])
+          print('Archived build:', info['CFBundleVersion'])
+          PYINFO
       - name: Publish iOS compiler results
         if: always() && github.event_name == 'push'
         uses: actions/github-script@v7
