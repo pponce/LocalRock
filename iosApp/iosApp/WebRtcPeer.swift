@@ -125,7 +125,9 @@ final class WebRtcPeer: NSObject, RtcNativePeer, RTCPeerConnectionDelegate {
                 localType: local?.values["candidateType"] as? String,
                 remoteType: remote?.values["candidateType"] as? String,
                 protocol: local?.values["protocol"] as? String,
-                videoReceived: frames > 0
+                videoReceived: frames > 0,
+                videoWidth: (video?.values["frameWidth"] as? NSNumber)?.int32Value ?? 0,
+                videoHeight: (video?.values["frameHeight"] as? NSNumber)?.int32Value ?? 0
             ))
         }
     }

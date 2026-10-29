@@ -33,10 +33,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import com.kodraliu.localrock.shared.vacuum.VacuumStateCodes
 import com.kodraliu.localrock.shared.vacuum.camera.CameraLiveSession
+import com.kodraliu.localrock.shared.vacuum.camera.CameraVideoQuality
 import com.kodraliu.localrock.shared.vacuum.camera.CameraMotionController
 import com.kodraliu.localrock.shared.vacuum.map.MapFormat
 import com.kodraliu.localrock.shared.vacuum.map.ParsedMap
 import com.kodraliu.localrock.shared.webrtc.RtcPeer
+import com.kodraliu.localrock.shared.webrtc.RtcDiagnostics
 import com.kodraliu.localrock.shared.webrtc.RtcVideoView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
@@ -48,7 +50,8 @@ internal fun CameraVideoControls(
     viewModel: VacuumViewModel, peer: RtcPeer?, motion: CameraMotionController,
     state: CameraLiveSession.State, ready: Boolean, expanded: Boolean,
     onExpand: (Boolean) -> Unit, onStopVideo: () -> Unit, onDock: () -> Unit,
-    onRetry: () -> Unit,
+    onRetry: () -> Unit, quality: CameraVideoQuality, qualityEnabled: Boolean, qualityError: String?,
+    diagnostics: RtcDiagnostics, onQuality: (CameraVideoQuality) -> Unit, onRetrySd: () -> Unit,
 ) {
     val status by viewModel.status.collectAsState()
     val map by viewModel.repository.parsedMap.collectAsState()
@@ -138,13 +141,14 @@ internal fun CameraVideoControls(
                 is CameraLiveSession.State.Failed -> Column(Modifier.align(Alignment.Center).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                     Text(current.message,color=Color.White,textAlign=TextAlign.Center)
                     Button(onClick=onRetry) { Text("Retry video") }
+                    if(quality==CameraVideoQuality.HD) TextButton(onClick=onRetrySd) {Text("Retry in SD")}
                 }
                 else -> Unit
             }
             Text(headline,Modifier.align(Alignment.TopCenter).padding(top=12.dp).background(Color.Black.copy(alpha=.35f)).padding(horizontal=8.dp),color=Color.White)
             Text(status.battery?.let {"$it%"} ?: "—%",Modifier.align(Alignment.TopStart).padding(12.dp),color=Color.White)
             if (controlsVisible || !expanded) Row(Modifier.align(Alignment.TopEnd).padding(4.dp),verticalAlignment=Alignment.CenterVertically) {
-                TextButton(onClick={motion.release();settings=true}) { Text("SD",color=Color.White) }
+                TextButton(onClick={motion.release();settings=true}) { Text(quality.name,color=Color.White) }
                 IconButton(onClick={motion.release();onExpand(!expanded)}) {
                     Icon(if(expanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                         if(expanded) "Exit full screen" else "Expand video",tint=Color.White)
@@ -204,7 +208,15 @@ internal fun CameraVideoControls(
     if(settings) AlertDialog(
         onDismissRequest={settings=false},title={Text("Remote viewing")},
         text={Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text("Video quality: SD")
+            Text("Requested video quality")
+            Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                CameraVideoQuality.entries.forEach {value->
+                    FilterChip(selected=quality==value,onClick={onQuality(value)},enabled=qualityEnabled,label={Text(value.name)})
+                }
+            }
+            if(diagnostics.videoWidth>0 && diagnostics.videoHeight>0)
+                Text("Received video: ${diagnostics.videoWidth} × ${diagnostics.videoHeight}")
+            qualityError?.let {Text(it,color=MaterialTheme.colorScheme.error)}
             Text("Call volume and microphone calls are not available in this build.")
             Button(onClick={},enabled=false,modifier=Modifier.fillMaxWidth()) {Text("Activate Remote Viewing")}
             Button(onClick={},enabled=false,modifier=Modifier.fillMaxWidth()) {Text("Deactivate Remote Viewing")}

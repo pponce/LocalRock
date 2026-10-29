@@ -28,6 +28,7 @@ import com.kodraliu.localrock.shared.vacuum.camera.CameraMotionController
 import com.kodraliu.localrock.shared.webrtc.RtcConnectionState
 import com.kodraliu.localrock.shared.vacuum.camera.CameraLiveSession
 import com.kodraliu.localrock.shared.vacuum.camera.CameraVideoTest
+import com.kodraliu.localrock.shared.vacuum.camera.CameraVideoQuality
 import com.kodraliu.localrock.shared.vacuum.camera.experimentalCameraSupported
 import com.kodraliu.localrock.shared.webrtc.liveViewSupported
 
@@ -54,30 +55,39 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
     val docked = robotStatus.state in setOf(VacuumStateCodes.CHARGING, VacuumStateCodes.CHARGING_COMPLETE)
     LaunchedEffect(ready) { if (!ready) motion.release() }
     val diagnostics by live.diagnostics.collectAsState()
+    val confirmedQuality by live.quality.collectAsState()
+    val qualityBusy by live.qualityBusy.collectAsState()
+    val qualityError by live.qualityError.collectAsState()
     val motionError by motion.error.collectAsState()
     val cleanupWarning by live.cleanupWarning.collectAsState()
     // Existing credentials are kept only for this screen's foreground lifetime.
     var pin by remember(viewModel) { mutableStateOf("") }
     var typed by remember { mutableStateOf(true) }
     var selectedTest by remember { mutableStateOf(CameraVideoTest.OEM_MATCH) }
+    var preferredQuality by remember { mutableStateOf(CameraVideoQuality.HD) }
+    var showConnectionTests by remember { mutableStateOf(false) }
     val supported = liveViewSupported && experimentalCameraSupported(viewModel.modelName)
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     fun dismissKeyboard() { focus.clearFocus(); keyboard?.hide() }
-    fun start(test: CameraVideoTest = selectedTest) {
+    fun start(test: CameraVideoTest = selectedTest, quality: CameraVideoQuality = preferredQuality) {
         if (pin.isNotBlank() && (state == CameraLiveSession.State.Idle || state is CameraLiveSession.State.Failed)) {
             selectedTest = test
+            preferredQuality = quality
             dismissKeyboard()
             viewing = true
             pendingCameraStart = docked
-            if (!docked) live.start(pin, test)
+            if (!docked) live.start(pin, test, quality)
         }
     }
 
+    LaunchedEffect(confirmedQuality, state) {
+        if (state == CameraLiveSession.State.Streaming) preferredQuality = confirmedQuality
+    }
     LaunchedEffect(viewing, docked, state) {
         if (viewing && pendingCameraStart && !docked && pin.isNotBlank() && state == CameraLiveSession.State.Idle) {
             pendingCameraStart = false
-            live.start(pin, selectedTest)
+            live.start(pin, selectedTest, preferredQuality)
         }
     }
     fun finish(returnToDock: Boolean = false) {
@@ -135,7 +145,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     if (typed) TextButton(onClick = { dismissKeyboard() }) { Text("Hide keyboard", color = Color.White) }
-                    Text("Choose a video tile to start its test.", style = MaterialTheme.typography.bodySmall)
+                    Text("Start video to open the viewer.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
@@ -145,7 +155,14 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
             if (viewing) {
                 CameraVideoControls(viewModel, peer, motion, state, ready, expanded,
                     onExpand={expanded=it}, onStopVideo={requestExit(false)},
-                    onDock={motion.release();exitNavigates=false;dockDialog=true},onRetry={start()})
+                    onDock={motion.release();exitNavigates=false;dockDialog=true},onRetry={start()},
+                    quality=if(pendingCameraStart || state is CameraLiveSession.State.Failed) preferredQuality else confirmedQuality,
+                    qualityEnabled=!qualityBusy && (pendingCameraStart || state==CameraLiveSession.State.Streaming || state is CameraLiveSession.State.Failed),
+                    qualityError=qualityError, diagnostics=diagnostics,
+                    onQuality={quality->
+                        if (state==CameraLiveSession.State.Streaming) live.changeQuality(quality)
+                        else {preferredQuality=quality;if(!pendingCameraStart) start(quality=quality)}
+                    },onRetrySd={start(quality=CameraVideoQuality.SD)})
             }
             if (!supported) {
                 Text("Experimental video is currently available for S7 MaxV only, in builds with WebRTC enabled.",
@@ -180,10 +197,15 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
                     TextButton(onClick = { dismissKeyboard(); typed = !typed; pin = "" }) {
                         Text(if (typed) "Use a pattern" else "Use a numeric PIN", color = Color.White)
                     }
-                    Text("Start with A, then try B–D. Stop before choosing another tile and follow the capture prompts.",
-                        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                    CameraTestTiles(enabled = pin.isNotBlank(), onStart = { start(it) })
-                    Text("All four use the robot's camera. Your phone's microphone and camera are not recorded.",
+                    Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        CameraVideoQuality.entries.forEach {quality->
+                            FilterChip(selected=preferredQuality==quality,onClick={preferredQuality=quality},label={Text(quality.name)})
+                        }
+                    }
+                    Button(onClick={start(CameraVideoTest.OEM_MATCH)},enabled=pin.isNotBlank()) {Text("Start video")}
+                    TextButton(onClick={showConnectionTests=!showConnectionTests}) {Text("Connection tests (SD)")}
+                    if(showConnectionTests) CameraTestTiles(enabled=pin.isNotBlank(),onStart={start(it,CameraVideoQuality.SD)})
+                    Text("Your phone's microphone and camera are not recorded.",
                         style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                     cleanupWarning?.let { Text(it, color = Color.Yellow, textAlign = TextAlign.Center) }
                 }

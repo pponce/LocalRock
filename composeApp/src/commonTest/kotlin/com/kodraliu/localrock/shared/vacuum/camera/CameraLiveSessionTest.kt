@@ -46,6 +46,8 @@ class CameraLiveSessionTest {
         val stoppedIds = mutableListOf<String>()
         val qualities = mutableListOf<String>()
         val offers = mutableListOf<String>()
+        val qualityChanges = mutableListOf<JsonElement>()
+        var qualityDelay = 0L
         var pinResult: JsonElement? = JsonPrimitive(true)
         var owner: String? = "none"
         var startDelay: Long = 0
@@ -76,6 +78,11 @@ class CameraLiveSessionTest {
                 "stop_camera_preview" -> {
                     stoppedIds += params.jsonObject["client_id"]!!.jsonPrimitive.content
                     owner = "none"
+                    JsonArray(listOf(JsonPrimitive("ok")))
+                }
+                "switch_video_quality" -> {
+                    qualityChanges += params
+                    delay(qualityDelay)
                     JsonArray(listOf(JsonPrimitive("ok")))
                 }
                 "get_turn_server" -> buildJsonObject {
@@ -447,5 +454,59 @@ class CameraLiveSessionTest {
         assertEquals(RtcMediaPath.RELAY, selectedPairDiagnostics("host", "relay", "tcp", true).path)
         assertFalse(selectedPairDiagnostics("host", "private-data", "private-data", true).toString().contains("private-data"))
     }
+    @Test fun hd_start_keeps_oem_signaling_and_releases_its_preview() = runTest {
+        val rpc=FakeRpc();val peer=FakePeer();val live=live(rpc,peer)
+        live.start("1234",CameraVideoTest.OEM_MATCH,CameraVideoQuality.HD);runCurrent()
+        assertEquals(listOf("HD"),rpc.qualities)
+        assertEquals(RtcOfferOptions(),peer.offerOptions)
+        assertEquals(CameraVideoQuality.HD,live.quality.value)
+        assertIs<CameraLiveSession.State.Streaming>(live.state.value)
+        live.stop();runCurrent();assertEquals(listOf("test-client-1"),rpc.stoppedIds);live.dispose()
+    }
+    @Test fun quality_switch_reuses_peer_and_preserves_the_stream() = runTest {
+        val rpc=FakeRpc();val peer=FakePeer();val live=live(rpc,peer)
+        live.start("1234");runCurrent()
+        live.changeQuality(CameraVideoQuality.HD);runCurrent()
+        assertEquals(CameraVideoQuality.HD,live.quality.value)
+        live.changeQuality(CameraVideoQuality.SD);runCurrent()
+        assertEquals(listOf("{\"quality\":\"HD\"}","{\"quality\":\"SD\"}"),rpc.qualityChanges.map {it.toString()})
+        assertSame(peer,live.peer.value);assertFalse(peer.closed);assertEquals(1,rpc.offers.size)
+        assertEquals(1,rpc.qualities.size);assertIs<CameraLiveSession.State.Streaming>(live.state.value)
+        live.stop();runCurrent();live.dispose()
+    }
+    @Test fun refused_quality_change_retains_last_confirmed_setting() = runTest {
+        val rpc=FakeRpc();val live=live(rpc)
+        live.start("1234");runCurrent();rpc.failMethod="switch_video_quality"
+        live.changeQuality(CameraVideoQuality.HD);runCurrent()
+        assertEquals(CameraVideoQuality.SD,live.quality.value);assertNotNull(live.qualityError.value)
+        assertFalse(live.qualityError.value!!.contains("private"));assertFalse(live.qualityBusy.value)
+        assertIs<CameraLiveSession.State.Streaming>(live.state.value)
+        live.stop();runCurrent();live.dispose()
+    }
+    @Test fun another_viewer_prevents_quality_commands() = runTest {
+        val rpc=FakeRpc();val live=live(rpc)
+        live.start("1234");runCurrent();rpc.owner="another-viewer"
+        live.changeQuality(CameraVideoQuality.HD);runCurrent()
+        assertTrue(rpc.qualityChanges.isEmpty());assertNotNull(live.qualityError.value)
+        live.stop();runCurrent();assertTrue(rpc.stoppedIds.isEmpty());live.dispose()
+    }
+    @Test fun pending_quality_change_does_not_overlap_or_restart_video() = runTest {
+        val rpc=FakeRpc().apply {qualityDelay=300};val live=live(rpc)
+        live.start("1234");runCurrent();live.changeQuality(CameraVideoQuality.HD);runCurrent()
+        live.changeQuality(CameraVideoQuality.HD);live.changeQuality(CameraVideoQuality.SD)
+        assertTrue(live.qualityBusy.value);advanceTimeBy(301);runCurrent()
+        assertEquals(1,rpc.qualityChanges.size);assertEquals(1,rpc.qualities.size)
+        assertEquals(CameraVideoQuality.HD,live.quality.value)
+        live.stop();runCurrent();live.dispose()
+    }
+    @Test fun stopping_cancels_pending_quality_change() = runTest {
+        val rpc=FakeRpc().apply {qualityDelay=300};val live=live(rpc)
+        live.start("1234");runCurrent();live.changeQuality(CameraVideoQuality.HD);runCurrent()
+        live.stop();runCurrent();advanceTimeBy(301);runCurrent()
+        assertEquals(CameraVideoQuality.SD,live.quality.value);assertFalse(live.qualityBusy.value)
+        val count=rpc.calls.size;live.changeQuality(CameraVideoQuality.HD);runCurrent();assertEquals(count,rpc.calls.size)
+        live.dispose()
+    }
+
 }
 
