@@ -54,6 +54,7 @@ class CameraLiveSessionTest {
         val qualityChanges = mutableListOf<JsonElement>()
         var qualityDelay = 0L
         var voiceStopDelay = 0L
+        var remoteVoiceDelay = 0L
         var pinResult: JsonElement? = JsonPrimitive(true)
         var owner: String? = "none"
         var startDelay: Long = 0
@@ -95,6 +96,10 @@ class CameraLiveSessionTest {
                     delay(voiceStopDelay)
                     JsonArray(listOf(JsonPrimitive("ok")))
                 }
+                "enable_homesec_voice" -> {
+                    delay(remoteVoiceDelay)
+                    JsonArray(listOf(JsonPrimitive("ok")))
+                }
                 "get_turn_server" -> buildJsonObject {
                     put("url", "turn:example.test:3478"); put("user", "test"); put("pwd", "test")
                 }
@@ -121,6 +126,25 @@ class CameraLiveSessionTest {
         return CameraLiveSession(rpc, { peer },
             CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])),
             clientId = { "test-client-${++id}" }, connectTimeoutMs = 5_000, cleanupTimeoutMs = 500)
+    }
+
+    @Test fun ending_video_waits_for_an_issued_voice_setting_before_releasing_preview() = runTest {
+        val rpc = FakeRpc().apply { remoteVoiceDelay = 300 }
+        val peer = FakePeer(); val live = live(rpc, peer)
+        live.remoteVoice.setEnabled(false); runCurrent()
+        assertTrue(rpc.calls.isEmpty())
+        live.start("1234"); runCurrent()
+        assertEquals(CameraLiveSession.State.Streaming, live.state.value)
+        assertFalse("enable_homesec_voice" in rpc.calls)
+        live.remoteVoice.setEnabled(false); runCurrent()
+        live.stop(); runCurrent()
+        assertTrue(rpc.stoppedIds.isEmpty())
+        advanceTimeBy(301); runCurrent()
+        assertEquals(1, rpc.calls.count { it == "enable_homesec_voice" })
+        assertEquals(1, rpc.stoppedIds.size)
+        assertNull(live.remoteVoice.acceptedEnabled.value)
+        assertEquals(CameraLiveSession.State.Idle, live.state.value)
+        assertTrue(peer.closed)
     }
 
     @Test fun ending_video_stops_audio_before_releasing_preview_and_waits_for_call_cleanup() = runTest {

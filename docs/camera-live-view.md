@@ -61,6 +61,24 @@ Tap **HD/SD** to change the requested quality. Video settings also show the rece
 frame dimensions when available, updating while the settings dialog is open.
 The quality label confirms a request; received dimensions describe the actual stream.
 If HD cannot connect, choose **Retry in SD**.
+## Experimental remote-viewing voice setting
+
+Open the three-dot **Remote viewing** menu while video is connected. The
+**Remote-viewing voice** checkbox starts with a dash because the robot's current
+setting cannot be read back. Tap it to request **Off**, then tap again to request
+**On**. A check or empty box records the last request the robot acknowledged during
+this connection; it does not confirm an audible change.
+
+This sends the experimental `enable_homesec_voice` command. Its effect on the
+S7 MaxV is unverified: it may affect the repeated announcement or conversation
+audio. Listen to the robot after changing it. Refusals and unconfirmed requests
+are displayed without interrupting video. Requests are only sent on an explicit
+tap, after camera ownership is checked, and are never retried automatically.
+
+Reconnecting resets the displayed state to unknown and sends no voice setting.
+The robot may retain a selection after video ends; closing the viewer does not
+restore or reapply it. Use **On** to explicitly request re-enabling it.
+
 ## Voice calls on iPhone
 
 Audio is off when video starts. Tap the **green microphone icon** after video connects to hear the

@@ -1,7 +1,7 @@
 name: Combined TestFlight validation
 on:
   push:
-    branches: [testflight/camera-schedules-map-furniture, review/testflight-ui-feedback-20261029]
+    branches: [testflight/camera-schedules-map-furniture, review/testflight-ui-feedback-20261029, review/testflight-video-voice-control]
   workflow_dispatch:
 concurrency:
   group: combined-${{ github.ref }}

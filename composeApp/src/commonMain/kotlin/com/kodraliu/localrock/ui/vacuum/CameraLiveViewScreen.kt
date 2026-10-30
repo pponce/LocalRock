@@ -177,7 +177,7 @@ fun CameraLiveViewScreen(viewModel: VacuumViewModel, onBack: () -> Unit) {
             // Attach the renderer while connecting so a first video frame can be decoded.
             if (viewing) {
                 CameraVideoControls(viewModel, peer, motion, state, ready, expanded,
-                    voice=live.voice,
+                    voice=live.voice, remoteVoice=live.remoteVoice,
                     onExpand={expanded=it}, onStopVideo={requestExit(false)},
                     onDock={motion.release();exitNavigates=false;dockDialog=true},onRetry={start()},
                     quality=if(pendingCameraStart || state is CameraLiveSession.State.Failed) preferredQuality else confirmedQuality,

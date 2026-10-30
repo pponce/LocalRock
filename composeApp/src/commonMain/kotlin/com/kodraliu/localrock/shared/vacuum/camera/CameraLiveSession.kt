@@ -68,6 +68,8 @@ class CameraLiveSession internal constructor(
     private var disposed = false
     val voice = CameraVoiceCall(rpc, scope, { activeAttempt?.peer }, { activeAttempt?.id },
         { !disposed && _state.value == State.Streaming })
+    val remoteVoice = CameraRemoteVoice(rpc, scope, { activeAttempt?.id },
+        { !disposed && _state.value == State.Streaming })
 
     private class Attempt(val id: String, val test: CameraVideoTest, val quality: CameraVideoQuality) {
         var previewRequested = false
@@ -106,7 +108,8 @@ class CameraLiveSession internal constructor(
             } finally {
                 _state.value = State.Stopping
                 qualityJob?.cancel()
-                withContext(NonCancellable) { voice.release() }
+                voice.stop()
+                withContext(NonCancellable) { remoteVoice.release(); voice.release() }
                 activeAttempt = null
                 _peer.value = null
                 try { attempt.peer?.close() } catch (_: Exception) { /* Continue preview cleanup. */ }
@@ -159,6 +162,7 @@ class CameraLiveSession internal constructor(
 
     fun stop() {
         voice.stop()
+        remoteVoice.stop()
         qualityJob?.cancel()
         if (attemptJob != null) {
             _state.value = State.Stopping
