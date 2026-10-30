@@ -312,6 +312,9 @@ internal fun CameraVideoControls(
                 remoteVoiceEnabled == null -> "Current setting unknown. Tap the checkbox to request Off."
                 else -> "$voiceToggleDescription. Listen to the robot to check the effect."
             },style=MaterialTheme.typography.bodySmall)
+            if(remoteVoiceEnabled == null) TextButton(
+                onClick={remoteVoice.setEnabled(true)},enabled=ready && !remoteVoiceBusy,
+            ) {Text("Request On")}
             Text("May affect announcements or call audio. Reconnects do not reapply it; the robot may retain your selection.",
                 style=MaterialTheme.typography.bodySmall)
             remoteVoiceError?.let {Text(it,color=MaterialTheme.colorScheme.error)}

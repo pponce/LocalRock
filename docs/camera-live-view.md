@@ -68,6 +68,8 @@ Open the three-dot **Remote viewing** menu while video is connected. The
 setting cannot be read back. Tap it to request **Off**, then tap again to request
 **On**. A check or empty box records the last request the robot acknowledged during
 this connection; it does not confirm an audible change.
+While the value is unknown, **Request On** also lets you explicitly re-enable it
+without first requesting Off, including after a timed-out request.
 
 This sends the experimental `enable_homesec_voice` command. Its effect on the
 S7 MaxV is unverified: it may affect the repeated announcement or conversation

@@ -130,6 +130,18 @@ class CameraRemoteVoiceTest {
         assertEquals(2, r.rpc.writes().size)
     }
 
+    @Test fun an_explicit_on_request_can_follow_an_uncertain_off_request() = runTest {
+        val r = Rig(backgroundScope); r.rpc.writeDelay = 1_000
+        r.control.setEnabled(false); runCurrent()
+        advanceTimeBy(501); runCurrent()
+        assertNull(r.control.acceptedEnabled.value)
+        r.rpc.writeDelay = 0
+        r.control.setEnabled(true); runCurrent()
+        assertEquals(true, r.control.acceptedEnabled.value)
+        assertEquals(Json.parseToJsonElement("{\"enable\":true}"), r.rpc.writes().last().second)
+        assertNull(r.control.error.value)
+    }
+
     @Test fun an_owner_check_timeout_sends_no_write() = runTest {
         val r = Rig(backgroundScope); r.rpc.ownerDelay = 1_000
         r.control.setEnabled(false); runCurrent()
