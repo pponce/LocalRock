@@ -1,6 +1,6 @@
 # Unified routine editor and device compatibility
 
-Status: Future work. Logged 2026-10-29. This is a design and implementation plan; the routine editor and older-device support have not been implemented or hardware-validated by this planning task.
+Status: Future work. Logged 2026-10-29; updated 2026-10-30. This is a design and implementation plan; the routine editor and older-device support have not been implemented or hardware-validated by this planning task.
 
 ## Objective
 
@@ -8,10 +8,13 @@ Provide one routine experience in LocalRock for vacuums with and without OEM rou
 
 For supported vacuums, create OEM-compatible scenes through the local server's existing scene APIs. A scene created in LocalRock should be readable, editable, and executable in the OEM app when both apps use the same local server. For older vacuums, the server should execute equivalent steps using commands that the device supports.
 
+Priority update (2026-10-30): The first milestone is routine creation and editing for Roborocks that already support OEM routines. Establish and validate that experience before adding routine support for models that lack it.
+
 ## Agreed requirements
 
 - Preserve OEM scene formats, identifiers, supported settings, and unrelated or unknown fields when creating and editing supported scenes.
 - Keep one routine catalog and editor across device models. Select execution behavior automatically from actual device capabilities.
+- Preserve an unfinished editor draft when scheduled cleaning starts. Handle busy-state restrictions and temporary map unavailability without losing work or interrupting the scheduled task.
 - Preserve existing OEM schedule behavior, including schedule IDs, enablement, time changes, and native timer links.
 - Homebridge schedule pause/delay implementation is outside this work. Do not redesign or modify it; compatibility is maintained through the existing OEM scheduling behavior.
 - Keep routine definitions, schedules, and execution progress on the local server. The phone must not need to remain open for later steps or scheduled runs.
@@ -66,6 +69,37 @@ Source references:
 - [Server routine runner](https://github.com/pponce/local_roborock_server/blob/99b64d71febddd2984dd7eeeafbdbfa4e0da0ffa/src/roborock_local_server/bundled_backend/shared/routine_runner.py)
 - [Schedule integration contract](https://github.com/pponce/local_roborock_server/blob/99b64d71febddd2984dd7eeeafbdbfa4e0da0ffa/docs/schedules.md)
 
+## Observed edge case: scheduled cleaning starts during routine creation
+
+Reported by the user on 2026-10-30 while exploring and trying to record the OEM routine-creation workflow with the local server. This is a user observation, not a reproduced or diagnosed server defect. The exact affected device, app build, firmware, server revision, and duration were not captured in this report.
+
+Observed sequence:
+
+1. Two saved routines were visible on the OEM app's vacuum list page.
+2. While the routine-creation workflow was open, a scheduled cleaning task started.
+3. The map became unavailable in the routine workflow.
+4. After leaving the workflow, the two existing routines were temporarily absent from the vacuum list page.
+5. The routines later reappeared without reported recreation. The disappearance occurred around the robot's transition from preparing to cleaning; its exact timing is unknown. There is no evidence from this observation that the saved definitions were deleted.
+6. While the robot was cleaning, tapping **Add favorite routine** was blocked with a message reported approximately as: "Task not completed. End the task before editing."
+
+It is not yet known whether the same behavior occurs with Roborock's cloud, whether the map/list disappearance is an OEM UI restriction or a local-server response issue, or which transition causes it. The editing restriction during active cleaning and the transient disappearance of saved routines are separate observations; do not assume they share a cause.
+
+Required LocalRock behavior for the supported-device milestone:
+
+- Preserve the draft, including selected map/rooms and step settings, when the robot becomes busy, the map becomes temporarily unavailable, or the user leaves and resumes the workflow.
+- Clearly explain any editing or saving restriction. If saving during cleaning is unsupported, retain the draft for an explicit retry when permitted; do not silently discard it or automatically submit it later.
+- Keep saved routines visible during preparing/cleaning transitions, with availability shown separately. A failed or unavailable refresh must not be treated as deletion or overwrite the saved catalog with an empty list.
+- Use a previously loaded map for drafting only when its identity and references remain valid. Otherwise retain the draft and explain the map's temporary unavailability; refresh and revalidate map/room references before saving or running.
+- Recheck any required busy-state and map conditions when saving, not just when opening the editor. A schedule may start between the initial check and the save request.
+- Let the scheduled cleaning continue normally. Opening or recovering an editor must not cancel, delay, pause, or replace the active cleaning task.
+
+Follow-up and acceptance checks:
+
+- Reproduce with the editor already open when a schedule fires, when a schedule starts during a save, and when opening the editor after cleaning has begun. Check preparing, active cleaning, and return-to-idle transitions.
+- Record app/server versions, device and firmware, timestamps, robot status, and sanitized scene-list/map/save responses. Distinguish an empty server result from an OEM rendering/loading issue.
+- Compare the same workflow against Roborock's cloud when feasible; keep the cause unclassified until evidence supports attribution.
+- Verify draft recovery, stable scene IDs/count, no unintended deletes or duplicate saves, map recovery, and explicit retry after the task finishes. Confirm schedule behavior remains unchanged.
+
 ## Execution and compatibility work
 
 1. Validate the complete plan before starting: device capability, supported settings, target map, and room or zone references. Revalidate affected references when maps change.
@@ -97,16 +131,16 @@ The PR review did not identify an existing proposal implementing the unified Loc
 
 1. Refresh both forks and upstream repositories, inspect applicable repository instructions, and recheck related PRs. Select current bases that preserve schedule, video, furniture, and map work.
 2. Establish the supported-device contract: create, edit, list, reorder, schedule, run, and delete a scene using the OEM app against the local server. Use sanitized captures or fixtures to resolve gaps in formats and scene-management commands.
-3. Extend the server's existing scene service and runner with capability validation and older-device command handling. Add durable execution tracking and explicit operations while retaining OEM API behavior.
-4. Build the LocalRock routine editor and status controls against that shared service. Retain settings the editor does not understand and reject edits that cannot preserve their meaning.
-5. Verify supported-scene round trips in both apps. A LocalRock-created scene on a supported robot must appear and remain editable/runnable in the OEM app connected to the same server.
+3. Implement the supported-device milestone first: close any scene-service contract gaps and build the LocalRock routine creation/editing UI for models with OEM routine support. Retain settings the editor does not understand and reject edits that cannot preserve their meaning.
+4. Verify supported-scene round trips in both apps. A LocalRock-created scene on a supported robot must appear and remain editable/runnable in the OEM app connected to the same server, subject to verified busy-state restrictions. Include the scheduled-start-during-editing cases above before considering this milestone complete.
+5. Then extend the shared service and runner for models without OEM routine support, using capability validation and older-device command handling. Add durable execution tracking and explicit operations while retaining OEM API behavior.
 6. Test equivalent room/full/zone routines on an S7 (`roborock.vacuum.a15`) and S7 MaxV (`roborock.vacuum.a27`). Confirm step order, settings, on-demand starts, scheduling, and phone-closed execution. Hardware support remains to be established by these tests.
 7. Exercise pauses, cancellation, recharging, busy robots, stale map references, disconnects, duplicate requests, unknown command outcomes, and server restart. Verify no unintended replay or advancement.
-8. Run existing schedule regression checks and validate OEM schedule IDs, enablement, edits, and native links. No Homebridge implementation changes are part of this work.
+8. Run existing schedule regression checks for each milestone and validate OEM schedule IDs, enablement, edits, and native links. No Homebridge implementation changes are part of this work.
 9. Prepare separate server and LocalRock implementation PRs with dependencies and hardware evidence stated precisely. The documentation-only planning branch does not serve as an integration base for those changes.
 
 ## Resume instructions
 
 Continue from this plan in `docs/project-notes/unified-routines-plan.md` on the `docs/unified-routines-plan` branch of `pponce/LocalRock`. Begin by refreshing the repository and PR state rather than treating the recorded commits as current heads.
 
-The next concrete task is to establish the OEM scene creation/editing/scheduling contract and identify which scene-management commands require capability handling. Implementation, deployment, and hardware testing remain future work.
+The next concrete task is to establish the OEM scene creation/editing/scheduling contract for supported devices, including behavior when scheduled cleaning begins during editing. Deliver and validate supported-device routine creation first; older-device routine support follows. Implementation, deployment, and hardware testing remain future work.
