@@ -8,7 +8,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.selection.triStateToggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -29,9 +28,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -43,7 +39,6 @@ import com.kodraliu.localrock.shared.vacuum.camera.CameraLiveSession
 import com.kodraliu.localrock.shared.vacuum.camera.CameraVideoQuality
 import com.kodraliu.localrock.shared.vacuum.camera.CameraMotionController
 import com.kodraliu.localrock.shared.vacuum.camera.CameraVoiceCall
-import com.kodraliu.localrock.shared.vacuum.camera.CameraRemoteVoice
 import com.kodraliu.localrock.shared.vacuum.map.MapFormat
 import com.kodraliu.localrock.shared.vacuum.map.ParsedMap
 import com.kodraliu.localrock.shared.webrtc.RtcPeer
@@ -58,7 +53,7 @@ import kotlinx.coroutines.launch
 internal fun CameraVideoControls(
     viewModel: VacuumViewModel, peer: RtcPeer?, motion: CameraMotionController,
     state: CameraLiveSession.State, ready: Boolean, expanded: Boolean,
-    voice: CameraVoiceCall, remoteVoice: CameraRemoteVoice,
+    voice: CameraVoiceCall,
     onExpand: (Boolean) -> Unit, onStopVideo: () -> Unit, onDock: () -> Unit,
     onRetry: () -> Unit, quality: CameraVideoQuality, qualityEnabled: Boolean, qualityError: String?,
     diagnostics: RtcDiagnostics, onQuality: (CameraVideoQuality) -> Unit, onRetrySd: () -> Unit,
@@ -76,9 +71,6 @@ internal fun CameraVideoControls(
     val remoteAudioMuted by voice.remoteAudioMuted.collectAsState()
     val speakerVolume by voice.speakerVolume.collectAsState()
     val volumeBusy by voice.volumeBusy.collectAsState()
-    val remoteVoiceEnabled by remoteVoice.acceptedEnabled.collectAsState()
-    val remoteVoiceBusy by remoteVoice.busy.collectAsState()
-    val remoteVoiceError by remoteVoice.error.collectAsState()
     val callsSupported = peer?.supportsVoiceCall == true
     var steering by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
@@ -282,43 +274,6 @@ internal fun CameraVideoControls(
     if(settings) AlertDialog(
         onDismissRequest={settings=false},title={Text("Remote viewing")},
         text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            val voiceToggleState = when (remoteVoiceEnabled) {
-                true -> ToggleableState.On
-                false -> ToggleableState.Off
-                null -> ToggleableState.Indeterminate
-            }
-            val voiceToggleDescription = when {
-                remoteVoiceBusy -> "Sending request"
-                remoteVoiceEnabled == true -> "On request accepted"
-                remoteVoiceEnabled == false -> "Off request accepted"
-                else -> "Unknown"
-            }
-            Row(Modifier.fillMaxWidth().triStateToggleable(
-                state=voiceToggleState, enabled=ready && !remoteVoiceBusy, role=Role.Checkbox,
-                onClick={remoteVoice.setEnabled(remoteVoiceEnabled == false)},
-            ).semantics { stateDescription=voiceToggleDescription }.padding(vertical=4.dp),
-                verticalAlignment=Alignment.CenterVertically) {
-                TriStateCheckbox(state=voiceToggleState,onClick=null,enabled=ready && !remoteVoiceBusy)
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Remote-viewing voice")
-                    Text("Experimental",style=MaterialTheme.typography.labelSmall)
-                }
-                if(remoteVoiceBusy) CircularProgressIndicator(Modifier.size(20.dp),strokeWidth=2.dp)
-            }
-            Text(when {
-                !ready -> "Connect video to change this setting."
-                remoteVoiceBusy -> "Sending voice setting…"
-                remoteVoiceEnabled == null -> "Current setting unknown. Tap the checkbox to request Off."
-                else -> "$voiceToggleDescription. Listen to the robot to check the effect."
-            },style=MaterialTheme.typography.bodySmall)
-            if(remoteVoiceEnabled == null) TextButton(
-                onClick={remoteVoice.setEnabled(true)},enabled=ready && !remoteVoiceBusy,
-            ) {Text("Request On")}
-            Text("May affect announcements or call audio. Reconnects do not reapply it; the robot may retain your selection.",
-                style=MaterialTheme.typography.bodySmall)
-            remoteVoiceError?.let {Text(it,color=MaterialTheme.colorScheme.error)}
-            HorizontalDivider()
             Text("Requested video quality")
             Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 CameraVideoQuality.entries.forEach {value->
