@@ -1,0 +1,105 @@
+name: Schedule restore validation (fork only)
+on:
+  push:
+    branches: [review/schedule-restore-validation-20261114]
+permissions:
+  contents: read
+  checks: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - name: Existing tests and Android build
+        id: baseline
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew --init-script local-work/restore-review/baseline.init.gradle :composeApp:testDebugUnitTest :composeApp:assembleDebug --stacktrace 2>&1 | tee baseline.log
+          mkdir -p local-work/restore-review/results/baseline
+          cp -r composeApp/build/test-results/testDebugUnitTest/. local-work/restore-review/results/baseline/
+      - name: Restore workflow regression probes
+        id: restore
+        if: steps.baseline.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew :composeApp:testDebugUnitTest --tests '*NativeRestoreFlowTest' --stacktrace 2>&1 | tee restore.log
+      - name: Publish validation details
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const logs = ['baseline.log','restore.log'].map(p => p + '\n' + (fs.existsSync(p) ? fs.readFileSync(p,'utf8').slice(-12000) : 'Not run')).join('\n');
+            const directories = ['local-work/restore-review/results/baseline', 'composeApp/build/test-results/testDebugUnitTest'];
+            let reports = '';
+            for (const dir of directories) {
+              if (!fs.existsSync(dir)) continue;
+              reports += '\nDIRECTORY '+dir+'\n';
+              for (const f of fs.readdirSync(dir).filter(f=>f.endsWith('.xml'))) {
+                const xml=fs.readFileSync(path.join(dir,f),'utf8');
+                reports += (xml.match(/<testsuite[^>]*>/)||[''])[0]+'\n';
+                for (const m of xml.matchAll(/<testcase\b[^>]*>([\s\S]*?)<\/testcase>/g)) {
+                  if (m[1].includes('<failure')) reports += m[0].slice(0,2200)+'\n';
+                }
+              }
+            }
+            fs.mkdirSync('local-work/restore-review/results',{recursive:true});
+            fs.writeFileSync('local-work/restore-review/results/summary.txt',reports);
+            await github.rest.checks.create({owner:context.repo.owner,repo:context.repo.repo,head_sha:context.sha,
+              name:'Restore review diagnostics',status:'completed',
+              conclusion:'${{ steps.baseline.outcome }}'==='success' && '${{ steps.restore.outcome }}'==='success' ? 'success' : 'failure',
+              output:{title:'Unmodified PR #37 plus validation tests',summary:'Baseline: ${{ steps.baseline.outcome }}; restore probes: ${{ steps.restore.outcome }}',text:('```text\n'+reports+'\n'+logs+'\n```').slice(0,64000)}});
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: schedule-restore-validation
+          path: |
+            baseline.log
+            restore.log
+            local-work/restore-review/results
+            composeApp/build/test-results/testDebugUnitTest
+            composeApp/build/reports/tests
+      - name: Require passing validation
+        if: always()
+        run: test '${{ steps.baseline.outcome }}' = success && test '${{ steps.restore.outcome }}' = success
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - name: Compile shared iPhone and simulator code
+        id: compile
+        run: |
+          set -o pipefail
+          ./gradlew :composeApp:compileKotlinIosArm64 :composeApp:compileKotlinIosSimulatorArm64 --stacktrace 2>&1 | tee ios.log
+      - name: Publish iOS diagnostics
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs');
+            const log=fs.existsSync('ios.log')?fs.readFileSync('ios.log','utf8'):'Not run';
+            await github.rest.checks.create({owner:context.repo.owner,repo:context.repo.repo,head_sha:context.sha,
+              name:'Restore review iOS diagnostics',status:'completed',conclusion:'${{ steps.compile.outcome }}'==='success'?'success':'failure',
+              output:{title:'iPhone and simulator shared compilation',summary:'${{ steps.compile.outcome }}',text:'```text\n'+log.slice(-50000)+'\n```'}});
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: schedule-restore-ios-log
+          path: ios.log
