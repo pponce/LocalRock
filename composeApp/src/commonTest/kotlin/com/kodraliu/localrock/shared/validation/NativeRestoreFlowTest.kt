@@ -64,7 +64,11 @@ class NativeRestoreFlowTest {
                             beforeRead?.invoke()
                             if (failRead) { err = buildJsonObject { put("code", -1); put("message", "read unavailable") }; JsonNull }
                             else if (reads == 1 && overrideFirstRead != null) overrideFirstRead!!
-                            else native?.let { buildJsonArray { add(buildJsonArray { add(nativeId); add(if (it) "on" else "off"); add(1) }) } ?: JsonArray(emptyList())
+                            else native?.let { enabled ->
+                                buildJsonArray {
+                                    add(buildJsonArray { add(nativeId); add(if (enabled) "on" else "off"); add(1) })
+                                }
+                            } ?: JsonArray(emptyList())
                         }
                         "set_server_timer" -> {
                             if (refuseSet) err = buildJsonObject { put("code", -10005); put("message", "Param error") }
@@ -111,10 +115,10 @@ class NativeRestoreFlowTest {
     }
 
     private fun job(enabled: Boolean = true, segments: JsonElement = JsonPrimitive("0"),
-        cron: String = "10 9 ? * 0", nativeName: String? = "1680623937705", unknown: Boolean = false): ServerSchedule =
+        cron: String = "10 9 ? * 0", nativeName: String? = "1680623937705", unknown: Boolean = false, repeated: Boolean = true): ServerSchedule =
         ServerSchedule(buildJsonObject {
             put("id", 918265); put("cron", cron); put("timeZoneId", "America/Los_Angeles")
-            put("enabled", enabled); put("repeated", true)
+            put("enabled", enabled); put("repeated", repeated)
             put("param", buildJsonObject {
                 put("id", 1); put("method", "server_scheduled_start")
                 put("params", buildJsonArray { add(buildJsonObject {
@@ -167,7 +171,7 @@ class NativeRestoreFlowTest {
         assertEquals("Off", restore()); assertEquals(false, robot.native)
         assertEquals(1, robot.sets()); assertEquals(1, robot.updates()); assertEquals(2, robot.reads)
     }
-    @Test fun dated_once_cron_is_preserved() = exercise(job(cron = "30 9 14 11 ?")) {
+    @Test fun dated_once_cron_is_preserved() = exercise(job(cron = "30 9 14 11 ?", repeated = false)) {
         restore(); assertEquals("30 9 14 11 *", robot.cron)
     }
     @Test fun existing_timer_is_not_overwritten() = exercise {

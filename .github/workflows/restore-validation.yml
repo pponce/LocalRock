@@ -16,6 +16,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
       - run: chmod +x gradlew
       - name: Existing tests and Android build
         id: baseline
@@ -39,7 +41,7 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const logs = ['baseline.log','restore.log'].map(p => p + '\n' + (fs.existsSync(p) ? fs.readFileSync(p,'utf8').split('\n').filter(l=>/^(e:|w:)|error:|FAILED|What went wrong|Execution failed|BUILD |tests completed|NativeRestoreFlowTest|> Task/.test(l)).join('\n').slice(-24000) : 'Not run')).join('\n');
+            const logs = ['baseline.log','restore.log'].map(p => p + '\n' + (fs.existsSync(p) ? fs.readFileSync(p,'utf8').split('\n').filter(l=>/^e:|error:|FAILED|What went wrong|Execution failed|BUILD |tests completed|NativeRestoreFlowTest|> Task/.test(l)).join('\n').slice(-24000) : 'Not run')).join('\n');
             const directories = ['local-work/restore-review/results/baseline', 'composeApp/build/test-results/testDebugUnitTest'];
             let reports = '';
             for (const dir of directories) {
@@ -73,6 +75,7 @@ jobs:
         if: always()
         run: test '${{ steps.baseline.outcome }}' = success && test '${{ steps.restore.outcome }}' = success
   ios:
+    if: "!contains(github.event.head_commit.message, '[tests only]')"
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -82,6 +85,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
       - run: chmod +x gradlew
       - name: Compile shared iPhone and simulator code
         id: compile
