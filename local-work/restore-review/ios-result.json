@@ -1,0 +1,11 @@
+{
+  "source": "f964cadd0beb0dd2ab39be9d21a59468e99c10b6",
+  "run": 43624553448,
+  "conclusion": "success",
+  "completed_at": "2026-11-14T18:09:32Z",
+  "url": "https://github.com/pponce/LocalRock/runs/132538788918",
+  "checks": [
+    "compileKotlinIosArm64",
+    "compileKotlinIosSimulatorArm64"
+  ]
+}

@@ -1,0 +1,19 @@
+test_consumed_one_time_job_is_not_resurrected_by_periodic_read (native_tests.NativeStoreTests.test_consumed_one_time_job_is_not_resurrected_by_periodic_read) ... ok
+test_deleted_job_is_not_recreated (native_tests.NativeStoreTests.test_deleted_job_is_not_recreated) ... ok
+test_duplicate_timer_or_job_ids_are_never_guessed (native_tests.NativeStoreTests.test_duplicate_timer_or_job_ids_are_never_guessed) ... ok
+test_earlier_enable_intent_does_not_resurrect_a_newly_consumed_occurrence (native_tests.NativeStoreTests.test_earlier_enable_intent_does_not_resurrect_a_newly_consumed_occurrence) ... ok
+test_missing_and_malformed_timer_entries_do_not_disable_jobs (native_tests.NativeStoreTests.test_missing_and_malformed_timer_entries_do_not_disable_jobs) ... ok
+test_noop_does_not_write_inventory (native_tests.NativeStoreTests.test_noop_does_not_write_inventory) ... ok
+test_persistence_failure_does_not_lose_inventory (native_tests.NativeStoreTests.test_persistence_failure_does_not_lose_inventory) ... ok
+test_reconciles_both_directions_and_preserves_identity_settings_and_other_devices (native_tests.NativeStoreTests.test_reconciles_both_directions_and_preserves_identity_settings_and_other_devices) ... ok
+test_serialized_and_object_params_keep_their_original_form (native_tests.NativeStoreTests.test_serialized_and_object_params_keep_their_original_form) ... ok
+test_stale_read_cannot_overwrite_job_edited_while_reading_robot (native_tests.NativeStoreTests.test_stale_read_cannot_overwrite_job_edited_while_reading_robot) ... ok
+test_unlinked_server_only_jobs_are_unchanged (native_tests.NativeStoreTests.test_unlinked_server_only_jobs_are_unchanged) ... ok
+test_consumed_one_time_job_keeps_existing_protection (__main__.RestoreInteractionTests.test_consumed_one_time_job_keeps_existing_protection) ... ok
+test_failed_restore_disable_can_reenable_saved_recurring_job (__main__.RestoreInteractionTests.test_failed_restore_disable_can_reenable_saved_recurring_job) ... ok
+test_later_confirmed_off_poll_eventually_corrects_the_window (__main__.RestoreInteractionTests.test_later_confirmed_off_poll_eventually_corrects_the_window) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.010s
+
+OK

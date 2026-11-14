@@ -1,0 +1,69 @@
+{
+  "source": "f964cadd0beb0dd2ab39be9d21a59468e99c10b6",
+  "validation_commit": "865c6b9b40b73d920c52712d62fab93a7bdafb23",
+  "run": 43625485455,
+  "url": "https://github.com/pponce/LocalRock/actions/runs/43625485455",
+  "baseline": {
+    "tests": 387,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "restore": {
+    "tests": 22,
+    "failures": 12,
+    "errors": 0,
+    "skipped": 0
+  },
+  "failures": [
+    {
+      "name": "reconcile_between_create_and_disable_must_not_leave_server_enabled",
+      "message": "java.lang.AssertionError: Success must verify the saved job is still disabled after native reconciliation"
+    },
+    {
+      "name": "lost_disable_reply_must_be_read_back",
+      "message": "java.lang.AssertionError: The applied off state should be verified after a lost reply"
+    },
+    {
+      "name": "changed_server_job_must_not_be_restored_from_stale_card",
+      "message": "java.lang.AssertionError: An externally edited schedule must be reloaded before restore expected:<0> but was:<1>"
+    },
+    {
+      "name": "failed_disable_retry_needs_a_recovery_path",
+      "message": "java.lang.AssertionError: Retry must repair a verified partial restore or direct the user to recovery expected:<false> but was:<true>"
+    },
+    {
+      "name": "unsupported_room_array_must_not_restore_as_whole_home",
+      "message": "java.lang.AssertionError: An unsupported segments shape must not be replaced with whole-home defaults expected:<0> but was:<1>"
+    },
+    {
+      "name": "shared_native_reference_must_block_restore",
+      "message": "java.lang.AssertionError: Two server jobs with the same native timer must not be guessed at expected:<0> but was:<1>"
+    },
+    {
+      "name": "real_create_response_timeout_must_be_read_back",
+      "message": "java.lang.AssertionError: Timeout after applied creation must trigger a read-back"
+    },
+    {
+      "name": "failed_disable_must_explicitly_report_partial_restore",
+      "message": "java.lang.AssertionError: Error must explain that creation succeeded and the disabled state was not established; got: The robot refused upd_server_timer: Param error (code -10005)"
+    },
+    {
+      "name": "malformed_success_array_must_not_mean_missing",
+      "message": "java.lang.AssertionError: A malformed list is unknown, not evidence that no timer exists expected:<0> but was:<1>"
+    },
+    {
+      "name": "deleted_server_job_must_not_be_restored_from_stale_card",
+      "message": "java.lang.AssertionError: A deleted server job must not recreate a robot timer expected:<0> but was:<1>"
+    },
+    {
+      "name": "lost_create_reply_must_be_read_back_without_repeating_write",
+      "message": "java.lang.AssertionError: A possibly successful write needs a read-back"
+    },
+    {
+      "name": "unknown_settings_must_be_preserved_or_restore_refused",
+      "message": "java.lang.AssertionError: Restore must not silently drop unsupported model-specific settings"
+    }
+  ],
+  "android_build": "success"
+}
