@@ -1,0 +1,90 @@
+{
+  "date": "2026-11-23",
+  "upstream": "427d2e6bd61226f4b00c583f84afc86ac1a63348",
+  "validation": [
+    {
+      "pr": 37,
+      "source": "d4dac0c246dca894832134b59247e4b2dca17faa",
+      "published": false,
+      "androidTests": 726,
+      "checks": [
+        {
+          "name": "PR 37 ios diagnostics",
+          "conclusion": "success",
+          "sourceTitle": "Candidate d4dac0c246dca894832134b59247e4b2dca17faa",
+          "details": "https://github.com/pponce/LocalRock/runs/137417549431"
+        },
+        {
+          "name": "PR 37 android diagnostics",
+          "conclusion": "success",
+          "sourceTitle": "Candidate d4dac0c246dca894832134b59247e4b2dca17faa",
+          "details": "https://github.com/pponce/LocalRock/runs/137414330052"
+        }
+      ],
+      "run": "https://github.com/pponce/LocalRock/actions/runs/45088543730"
+    },
+    {
+      "pr": 95,
+      "source": "7eaed3e7ca48fdbeafbc87e1e1b18102b920d5e9",
+      "published": true,
+      "androidTests": 743,
+      "checks": [
+        {
+          "name": "PR 95 ios diagnostics",
+          "conclusion": "success",
+          "sourceTitle": "Candidate 7eaed3e7ca48fdbeafbc87e1e1b18102b920d5e9",
+          "details": "https://github.com/pponce/LocalRock/runs/137419612874"
+        },
+        {
+          "name": "PR 95 android diagnostics",
+          "conclusion": "success",
+          "sourceTitle": "Candidate 7eaed3e7ca48fdbeafbc87e1e1b18102b920d5e9",
+          "details": "https://github.com/pponce/LocalRock/runs/137415803641"
+        }
+      ],
+      "run": "https://github.com/pponce/LocalRock/actions/runs/45089390371"
+    },
+    {
+      "pr": 96,
+      "source": "7a2677524cb7d9ec86d2f45711919c7968269871",
+      "published": true,
+      "androidTests": 655,
+      "checks": [
+        {
+          "name": "PR 96 ios diagnostics",
+          "conclusion": "success",
+          "sourceTitle": "Candidate 6dc68c698e06cbe5d101319596d25d09530910d3",
+          "details": "https://github.com/pponce/LocalRock/runs/137418975765"
+        },
+        {
+          "name": "PR 96 android diagnostics",
+          "conclusion": "success",
+          "sourceTitle": "Candidate 6dc68c698e06cbe5d101319596d25d09530910d3",
+          "details": "https://github.com/pponce/LocalRock/runs/137415586327"
+        }
+      ],
+      "run": "https://github.com/pponce/LocalRock/actions/runs/45089155820"
+    },
+    {
+      "pr": 97,
+      "source": "dc7f170039bd8f662efcb79ec14106c4fd9aa639",
+      "published": true,
+      "androidTests": 637,
+      "checks": [
+        {
+          "name": "PR 97 ios diagnostics",
+          "conclusion": "success",
+          "sourceTitle": "Candidate dc7f170039bd8f662efcb79ec14106c4fd9aa639",
+          "details": "https://github.com/pponce/LocalRock/runs/137422643438"
+        },
+        {
+          "name": "PR 97 android diagnostics",
+          "conclusion": "success",
+          "sourceTitle": "Candidate dc7f170039bd8f662efcb79ec14106c4fd9aa639",
+          "details": "https://github.com/pponce/LocalRock/runs/137417281463"
+        }
+      ],
+      "run": "https://github.com/pponce/LocalRock/actions/runs/45089871522"
+    }
+  ]
+}
