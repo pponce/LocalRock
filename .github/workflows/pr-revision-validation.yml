@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [{"pr":95,"ref":"367ed5de72e6433eb358ce7d45b32e76eca7269a","repo":"pponce/LocalRock"}]
+        target: [{"pr":95,"ref":"7eaed3e7ca48fdbeafbc87e1e1b18102b920d5e9","repo":"pponce/LocalRock"}]
         platform: [android, ios]
     runs-on: ${{ matrix.platform == 'ios' && 'macos-latest' || 'ubuntu-latest' }}
     timeout-minutes: 40
