@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [{"pr":95,"ref":"dd803caed939f457c1c5d34345841ec757d34702","repo":"pponce/LocalRock"},{"pr":96,"ref":"eb7165d796e13c4cf94ffe7cbfd8bb62dd30590d","repo":"pponce/LocalRock"},{"pr":97,"ref":"3055634334021ecfd048019f73cd0c246f150572","repo":"pponce/LocalRock"},{"pr":37,"ref":"d4dac0c246dca894832134b59247e4b2dca17faa","repo":"virtitnerd/LocalRock"}]
+        target: [{"pr":95,"ref":"84deb9301a3d17499c14b9b7c8d724fd7a7e9e39","repo":"pponce/LocalRock"},{"pr":96,"ref":"6dc68c698e06cbe5d101319596d25d09530910d3","repo":"pponce/LocalRock"},{"pr":97,"ref":"c7002c16a6786624d11b287d5a60516cf0c637ff","repo":"pponce/LocalRock"}]
         platform: [android, ios]
     runs-on: ${{ matrix.platform == 'ios' && 'macos-latest' || 'ubuntu-latest' }}
     timeout-minutes: 40
