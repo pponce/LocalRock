@@ -680,5 +680,50 @@ class CameraLiveSessionTest {
         live.dispose()
     }
 
+
+    @Test fun s7_maxv_ack_and_all_offer_variants_survive_start_and_turn_retries_without_audio() = runTest {
+        // S7 MaxV accepts ["ok"] for PIN verification. Retry behavior is simulated,
+        // not a claim that these transient errors were captured on that model.
+        for (variant in CameraVideoTest.entries) {
+            val rpc = FakeRpc().apply {
+                pinResult = Json.parseToJsonElement("[\"ok\"]")
+                startRefusals = 2
+                turnNotReady = 2
+            }
+            val peer = FakePeer()
+            val live = live(rpc, peer)
+            live.start("1234", variant)
+            advanceTimeBy(2_100); runCurrent()
+            assertIs<CameraLiveSession.State.Streaming>(live.state.value)
+            assertEquals(variant.offerOptions, peer.offerOptions)
+            assertEquals(listOf(variant.previewQuality), rpc.qualities)
+            assertEquals(3, rpc.calls.count { it == "start_camera_preview" })
+            assertEquals(3, rpc.calls.count { it == "get_turn_server" })
+            assertEquals(0, peer.microphoneRequests)
+            assertFalse(peer.audioActive)
+            assertFalse("start_voice_chat" in rpc.calls)
+            live.stop(); runCurrent()
+            assertEquals(listOf("test-client-1"), rpc.stoppedIds)
+            assertTrue(peer.closed)
+            live.dispose()
+        }
+    }
+
+    @Test fun stopping_during_turn_retry_releases_preview_and_never_resumes_connection() = runTest {
+        val rpc = FakeRpc().apply { turnNotReady = 100 }
+        val peer = FakePeer()
+        val live = live(rpc, peer)
+        live.start("1234"); runCurrent()
+        assertEquals(1, rpc.calls.count { it == "get_turn_server" })
+        live.stop(); runCurrent()
+        val stoppedCalls = rpc.calls.toList()
+        advanceTimeBy(10_000); runCurrent()
+        assertEquals(stoppedCalls, rpc.calls)
+        assertEquals(listOf("test-client-1"), rpc.stoppedIds)
+        assertFalse("send_sdp_to_robot" in rpc.calls)
+        assertEquals(0, peer.microphoneRequests)
+        assertIs<CameraLiveSession.State.Idle>(live.state.value)
+        live.dispose()
+    }
 }
 
