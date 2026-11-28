@@ -292,4 +292,35 @@ class ScheduleEnablementTest {
         f.beforeRead = { if (f.timerWrites > 0) f.job = ServerSchedule(JsonObject(f.job!!.raw + mapOf("enabled" to JsonPrimitive(true), "cron" to JsonPrimitive("changed")))) }
         assertFailsWith<ScheduleException> { f.set(true) }; assertEquals(0, f.jobWrites)
     }
+
+    @Test fun lost_native_ack_with_server_reconciliation_preserves_settings_in_both_directions() = runTest {
+        for (desired in listOf(true, false)) {
+            val f = Fixture(serverEnabled = !desired, robotEnabled = !desired)
+            val original = f.job!!.raw
+            f.failTimerWrite = true
+            f.beforeRead = {
+                if (f.timerWrites > 0)
+                    f.job = ServerSchedule(JsonObject(f.job!!.raw + ("enabled" to JsonPrimitive(f.robot))))
+            }
+            val saved = f.set(desired)
+            assertEquals(desired, saved.enabled)
+            assertEquals(original - "enabled", saved.raw - "enabled")
+            assertEquals(1, f.timerWrites)
+            assertEquals(0, f.jobWrites)
+            assertTrue(f.timerReads >= 2)
+        }
+    }
+
+    @Test fun acknowledged_but_unapplied_native_toggle_never_updates_http_in_either_direction() = runTest {
+        for (desired in listOf(true, false)) {
+            val f = Fixture(serverEnabled = !desired, robotEnabled = !desired)
+            val original = f.job!!.raw
+            f.applyTimer = false
+            assertFailsWith<ScheduleException> { f.set(desired) }
+            assertEquals(!desired, f.robot)
+            assertEquals(original, f.job!!.raw)
+            assertEquals(1, f.timerWrites)
+            assertEquals(0, f.jobWrites)
+        }
+    }
 }
